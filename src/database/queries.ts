@@ -3,13 +3,18 @@ import {
   Class, Lesson, LessonEntry, LessonActivityOption, Activity, Reminder, ActivityTypeOption,
   ScheduleSettings, SchedulePeriod, ProfessionalProfile,
 } from '../types';
-import { ACTIVITY_TYPE_CONFIG, hexToRgba } from '../utils/colors';
+import { ACTIVITY_TYPE_CONFIG, CLASS_COLORS, hexToRgba } from '../utils/colors';
+import type { ScheduleImportItem } from '../utils/scheduleImport';
 import {
   DEFAULT_LESSON_ACTIVITY_LABELS,
   normalizeLessonActivityKey,
   parseLessonActivities,
   stringifyLessonActivities,
 } from '../utils/lessonActivities';
+
+const INITIAL_REGISTRATION_KEY = 'initial_registration_complete_v1';
+const GUIDED_TOUR_KEY = 'guided_tour_complete_v1';
+const INITIAL_SCHEDULE_SETUP_KEY = 'initial_schedule_setup_complete_v1';
 
 export function monthKeyFromDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -64,10 +69,18 @@ async function ensureScheduleForMonth(monthKey: string): Promise<void> {
   for (const lesson of sourceLessons) {
     await database.runAsync(
       `INSERT INTO lessons (
-        class_id, schedule_month, weekday, start_time, end_time,
+        class_id, kind, title, schedule_month, weekday, start_time, end_time,
         content, activity, methodology, status, notes
-      ) VALUES (?, ?, ?, ?, ?, '', '', '', '', '')`,
-      [lesson.class_id, monthKey, lesson.weekday, lesson.start_time, lesson.end_time]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', '', '')`,
+      [
+        lesson.class_id,
+        lesson.kind ?? 'class',
+        lesson.title ?? '',
+        monthKey,
+        lesson.weekday,
+        lesson.start_time,
+        lesson.end_time,
+      ]
     );
   }
 }
@@ -102,7 +115,7 @@ export async function getLessonsForWeek(monthKey = todayMonthKey()): Promise<Les
   return await getDB().getAllAsync<Lesson>(`
     SELECT l.*, c.name as class_name, c.color as class_color, c.subject
     FROM lessons l
-    JOIN classes c ON l.class_id = c.id
+    LEFT JOIN classes c ON l.class_id = c.id
     WHERE l.schedule_month = ?
     ORDER BY l.weekday ASC, l.start_time ASC
   `, [monthKey]);
@@ -113,7 +126,7 @@ export async function getLessonsForDay(weekday: number, monthKey = todayMonthKey
   return await getDB().getAllAsync<Lesson>(`
     SELECT l.*, c.name as class_name, c.color as class_color, c.subject
     FROM lessons l
-    JOIN classes c ON l.class_id = c.id
+    LEFT JOIN classes c ON l.class_id = c.id
     WHERE l.schedule_month = ? AND l.weekday = ?
     ORDER BY l.start_time ASC
   `, [monthKey, weekday]);
@@ -136,9 +149,10 @@ export async function getLessonsForDate(date: string): Promise<Lesson[]> {
       COALESCE(le.activity, '') as activity,
       COALESCE(le.methodology, '') as methodology,
       COALESCE(le.status, '') as status,
-      COALESCE(le.notes, '') as notes
+      COALESCE(le.notes, '') as notes,
+      COALESCE(le.conteudo_preparado, 0) as conteudo_preparado
     FROM lessons l
-    JOIN classes c ON l.class_id = c.id
+    LEFT JOIN classes c ON l.class_id = c.id
     LEFT JOIN lesson_entries le ON le.lesson_id = l.id AND le.date = ?
     WHERE l.schedule_month = ? AND l.weekday = ?
     ORDER BY l.start_time ASC
@@ -150,10 +164,12 @@ export async function createLesson(
   monthKey = data.schedule_month ?? todayMonthKey()
 ): Promise<number> {
   const result = await getDB().runAsync(
-    `INSERT INTO lessons (class_id, schedule_month, weekday, start_time, end_time, content, activity, methodology, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO lessons (class_id, kind, title, schedule_month, weekday, start_time, end_time, content, activity, methodology, status, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.class_id,
+      data.kind ?? 'class',
+      data.title ?? '',
       monthKey,
       data.weekday,
       data.start_time,
@@ -170,8 +186,21 @@ export async function createLesson(
 
 export async function updateLesson(id: number, data: Omit<Lesson, 'id' | 'created_at' | 'class_name' | 'class_color' | 'subject'>): Promise<void> {
   await getDB().runAsync(
-    `UPDATE lessons SET class_id=?, weekday=?, start_time=?, end_time=?, content=?, activity=?, methodology=?, status=?, notes=? WHERE id=?`,
-    [data.class_id, data.weekday, data.start_time, data.end_time, data.content, data.activity, data.methodology, data.status ?? '', data.notes, id]
+    `UPDATE lessons SET class_id=?, kind=?, title=?, weekday=?, start_time=?, end_time=?, content=?, activity=?, methodology=?, status=?, notes=? WHERE id=?`,
+    [
+      data.class_id,
+      data.kind ?? 'class',
+      data.title ?? '',
+      data.weekday,
+      data.start_time,
+      data.end_time,
+      data.content,
+      data.activity,
+      data.methodology,
+      data.status ?? '',
+      data.notes,
+      id,
+    ]
   );
 }
 
@@ -179,22 +208,116 @@ export async function deleteLesson(id: number): Promise<void> {
   await getDB().runAsync('DELETE FROM lessons WHERE id=?', [id]);
 }
 
+async function findOrCreateImportedClass(item: ScheduleImportItem): Promise<{ classId: number; created: boolean }> {
+  const existing = await getDB().getFirstAsync<Class>(
+    'SELECT * FROM classes WHERE lower(name) = lower(?) AND lower(subject) = lower(?) LIMIT 1',
+    [item.className, item.subject]
+  );
+
+  if (existing) return { classId: existing.id, created: false };
+
+  const classCount = await getDB().getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM classes');
+  const color = CLASS_COLORS[(classCount?.count ?? 0) % CLASS_COLORS.length]?.value ?? '#0F4C81';
+  const classId = await createClass({
+    name: item.className,
+    grade: item.grade || item.className,
+    subject: item.subject,
+    color,
+    student_count: 0,
+  });
+
+  return { classId, created: true };
+}
+
+async function lessonAlreadyExists(item: ScheduleImportItem, classId: number | null, monthKey: string): Promise<boolean> {
+  const row = await getDB().getFirstAsync<{ id: number }>(
+    `SELECT id
+     FROM lessons
+     WHERE schedule_month = ?
+       AND weekday = ?
+       AND start_time = ?
+       AND end_time = ?
+       AND kind = ?
+       AND COALESCE(title, '') = ?
+       AND (
+         (? IS NULL AND class_id IS NULL)
+         OR class_id = ?
+       )
+     LIMIT 1`,
+    [
+      monthKey,
+      item.weekday,
+      item.start_time,
+      item.end_time,
+      item.kind,
+      item.title,
+      classId,
+      classId,
+    ]
+  );
+
+  return !!row;
+}
+
+export async function importWeeklySchedule(
+  items: ScheduleImportItem[],
+  monthKey = todayMonthKey()
+): Promise<{ createdClasses: number; createdLessons: number; skippedLessons: number }> {
+  let createdClasses = 0;
+  let createdLessons = 0;
+  let skippedLessons = 0;
+
+  for (const item of items) {
+    let classId: number | null = null;
+
+    if (item.kind === 'class') {
+      const result = await findOrCreateImportedClass(item);
+      classId = result.classId;
+      if (result.created) createdClasses++;
+    }
+
+    if (await lessonAlreadyExists(item, classId, monthKey)) {
+      skippedLessons++;
+      continue;
+    }
+
+    await createLesson({
+      class_id: classId,
+      kind: item.kind,
+      title: item.title,
+      schedule_month: monthKey,
+      weekday: item.weekday,
+      start_time: item.start_time,
+      end_time: item.end_time,
+      content: '',
+      activity: '',
+      methodology: '',
+      status: '',
+      notes: '',
+    }, monthKey);
+    createdLessons++;
+  }
+
+  return { createdClasses, createdLessons, skippedLessons };
+}
+
 export async function upsertLessonEntry(
   lessonId: number,
   date: string,
-  data: Pick<LessonEntry, 'content' | 'activity' | 'methodology' | 'status' | 'notes'>
+  data: Pick<LessonEntry, 'content' | 'activity' | 'methodology' | 'status' | 'notes' | 'conteudo_preparado'>
 ): Promise<void> {
   await getDB().runAsync(
-    `INSERT INTO lesson_entries (lesson_id, date, content, activity, methodology, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO lesson_entries (lesson_id, date, content, activity, methodology, status, notes, conteudo_preparado)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(lesson_id, date) DO UPDATE SET
        content=excluded.content,
        activity=excluded.activity,
        methodology=excluded.methodology,
        status=excluded.status,
        notes=excluded.notes,
+       conteudo_preparado=excluded.conteudo_preparado,
        updated_at=datetime('now')`,
-    [lessonId, date, data.content, data.activity, data.methodology, data.status, data.notes]
+    [lessonId, date, data.content, data.activity, data.methodology, data.status, data.notes, data.conteudo_preparado ?? 0]
   );
 }
 
@@ -386,6 +509,45 @@ export async function updateProfessionalProfile(data: Omit<ProfessionalProfile, 
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
+async function hasMetadataFlag(key: string): Promise<boolean> {
+  const row = await getDB().getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_metadata WHERE key = ?',
+    [key]
+  );
+  return row?.value === 'done';
+}
+
+async function markMetadataFlag(key: string): Promise<void> {
+  await getDB().runAsync(
+    'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+    [key, 'done']
+  );
+}
+
+export async function hasCompletedInitialRegistration(): Promise<boolean> {
+  return hasMetadataFlag(INITIAL_REGISTRATION_KEY);
+}
+
+export async function markInitialRegistrationComplete(): Promise<void> {
+  await markMetadataFlag(INITIAL_REGISTRATION_KEY);
+}
+
+export async function hasCompletedGuidedTour(): Promise<boolean> {
+  return hasMetadataFlag(GUIDED_TOUR_KEY);
+}
+
+export async function markGuidedTourComplete(): Promise<void> {
+  await markMetadataFlag(GUIDED_TOUR_KEY);
+}
+
+export async function hasCompletedInitialScheduleSetup(): Promise<boolean> {
+  return hasMetadataFlag(INITIAL_SCHEDULE_SETUP_KEY);
+}
+
+export async function markInitialScheduleSetupComplete(): Promise<void> {
+  await markMetadataFlag(INITIAL_SCHEDULE_SETUP_KEY);
+}
+
 export async function getActiveSchedulePeriod(): Promise<SchedulePeriod> {
   const row = await getDB().getFirstAsync<{ period: SchedulePeriod }>('SELECT period FROM schedule_settings WHERE id=1');
   return row?.period ?? 'integral';
@@ -393,7 +555,23 @@ export async function getActiveSchedulePeriod(): Promise<SchedulePeriod> {
 
 export async function getScheduleSettingsForPeriod(period: SchedulePeriod): Promise<ScheduleSettings> {
   const s = await getDB().getFirstAsync<Omit<ScheduleSettings, 'id'>>(
-    'SELECT ? as period, start_time, end_time, lesson_duration, break_duration, break_after_lesson, lunch_start, lunch_duration, afternoon_break_duration, afternoon_break_after_lesson FROM period_schedule_settings WHERE period=?',
+    `SELECT
+       ? as period,
+       start_time,
+       end_time,
+       morning_start_time,
+       morning_end_time,
+       afternoon_start_time,
+       afternoon_end_time,
+       lesson_duration,
+       break_duration,
+       break_after_lesson,
+       lunch_start,
+       lunch_duration,
+       afternoon_break_duration,
+       afternoon_break_after_lesson
+     FROM period_schedule_settings
+     WHERE period=?`,
     [period, period]
   );
 
@@ -406,6 +584,10 @@ export async function getScheduleSettingsForPeriod(period: SchedulePeriod): Prom
     period,
     start_time: period === 'tarde' ? '14:00' : '07:30',
     end_time: period === 'integral' ? '17:00' : period === 'manha' ? '12:00' : '17:00',
+    morning_start_time: '07:30',
+    morning_end_time: '12:00',
+    afternoon_start_time: period === 'tarde' ? '14:00' : '13:00',
+    afternoon_end_time: '17:00',
     lesson_duration: 48,
     break_duration: 20,
     break_after_lesson: 2,
@@ -424,13 +606,18 @@ export async function getScheduleSettings(): Promise<ScheduleSettings> {
 export async function updateScheduleSettings(data: Omit<ScheduleSettings, 'id'>): Promise<void> {
   await getDB().runAsync(
     `INSERT INTO period_schedule_settings (
-       period, start_time, end_time, lesson_duration, break_duration, break_after_lesson,
+       period, start_time, end_time, morning_start_time, morning_end_time,
+       afternoon_start_time, afternoon_end_time, lesson_duration, break_duration, break_after_lesson,
        lunch_start, lunch_duration, afternoon_break_duration, afternoon_break_after_lesson
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(period) DO UPDATE SET
        start_time=excluded.start_time,
        end_time=excluded.end_time,
+       morning_start_time=excluded.morning_start_time,
+       morning_end_time=excluded.morning_end_time,
+       afternoon_start_time=excluded.afternoon_start_time,
+       afternoon_end_time=excluded.afternoon_end_time,
        lesson_duration=excluded.lesson_duration,
        break_duration=excluded.break_duration,
        break_after_lesson=excluded.break_after_lesson,
@@ -442,6 +629,10 @@ export async function updateScheduleSettings(data: Omit<ScheduleSettings, 'id'>)
       data.period,
       data.start_time,
       data.end_time,
+      data.morning_start_time,
+      data.morning_end_time,
+      data.afternoon_start_time,
+      data.afternoon_end_time,
       data.lesson_duration,
       data.break_duration,
       data.break_after_lesson,
@@ -454,13 +645,18 @@ export async function updateScheduleSettings(data: Omit<ScheduleSettings, 'id'>)
 
   await getDB().runAsync(
     `UPDATE schedule_settings
-     SET period=?, start_time=?, end_time=?, lesson_duration=?, break_duration=?, break_after_lesson=?,
+     SET period=?, start_time=?, end_time=?, morning_start_time=?, morning_end_time=?,
+         afternoon_start_time=?, afternoon_end_time=?, lesson_duration=?, break_duration=?, break_after_lesson=?,
          lunch_start=?, lunch_duration=?, afternoon_break_duration=?, afternoon_break_after_lesson=?
      WHERE id=1`,
     [
       data.period,
       data.start_time,
       data.end_time,
+      data.morning_start_time,
+      data.morning_end_time,
+      data.afternoon_start_time,
+      data.afternoon_end_time,
       data.lesson_duration,
       data.break_duration,
       data.break_after_lesson,

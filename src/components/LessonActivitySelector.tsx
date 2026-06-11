@@ -53,6 +53,7 @@ export function LessonActivitySelector({
       <View style={styles.grid}>
         {options.map(option => {
           const active = selected.includes(option.label);
+          const canDelete = Boolean(option.is_custom);
 
           return (
             <TouchableOpacity
@@ -63,10 +64,10 @@ export function LessonActivitySelector({
                 active && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
               onPress={() => toggle(option.label)}
-              onLongPress={() => {
-                if (option.is_custom) onDeleteCustom(option);
-              }}
+              onLongPress={canDelete ? () => onDeleteCustom(option) : undefined}
+              delayLongPress={360}
               activeOpacity={0.78}
+              accessibilityHint={canDelete ? 'Pressione e segure para excluir esta atividade personalizada.' : undefined}
             >
               <Text style={[
                 styles.chipText,

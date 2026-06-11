@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, StatusBar, Alert,
+  TextInput, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,13 +11,19 @@ import {
 import { Class, ProfessionalProfile } from '../../types';
 import { CLASS_COLORS } from '../../utils/colors';
 import { useAppTheme } from '../../theme';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { ConfirmDialog, type ConfirmDialogVariant } from '../../components/ConfirmDialog';
 import { BottomSheetModal } from '../../components/BottomSheetModal';
+import { ActionButton } from '../../components/ActionButton';
+import { EmptyState } from '../../components/EmptyState';
+import { SheetScrollView } from '../../components/SheetScrollView';
 
 type ConfirmDialogState = {
   visible: boolean;
   title: string;
   message: string;
+  confirmLabel?: string;
+  cancelLabel?: string | null;
+  variant?: ConfirmDialogVariant;
   onConfirm: () => void | Promise<void>;
 };
 
@@ -44,8 +50,9 @@ export function TurmasScreen() {
   const [editing, setEditing] = useState<Class | null>(null);
   const [customSubject, setCustomSubject] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(EMPTY_CONFIRM_DIALOG);
+  const [formErrors, setFormErrors] = useState<{ name?: string; subject?: string }>({});
   const [form, setForm] = useState({
-    name: '', grade: '', subject: '', color: '#0F4C81', student_count: '0',
+    name: '', subject: '', color: '#0F4C81', student_count: '0',
   });
 
   const load = useCallback(async () => {
@@ -65,11 +72,11 @@ export function TurmasScreen() {
     setCustomSubject(subjectOptions.length === 0);
     setForm({
       name: '',
-      grade: '',
       subject: subjectOptions[0] ?? '',
       color: '#0F4C81',
       student_count: '0',
     });
+    setFormErrors({});
     setShowModal(true);
   };
 
@@ -79,20 +86,28 @@ export function TurmasScreen() {
     setCustomSubject(!subjectOptions.includes(c.subject));
     setForm({
       name: c.name,
-      grade: c.grade,
       subject: c.subject,
       color: c.color,
       student_count: String(c.student_count),
     });
+    setFormErrors({});
     setShowModal(true);
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) { Alert.alert('Atenção', 'Informe o nome da turma'); return; }
-    if (!form.subject.trim()) { Alert.alert('Atenção', 'Informe o componente curricular'); return; }
+    const nextErrors = {
+      name: form.name.trim() ? undefined : 'Informe o nome da turma',
+      subject: form.subject.trim() ? undefined : 'Informe o componente curricular',
+    };
+
+    if (nextErrors.name || nextErrors.subject) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
     const data = {
       name: form.name.trim(),
-      grade: form.grade.trim() || form.name.trim(),
+      grade: form.name.trim(),
       subject: form.subject.trim(),
       color: form.color,
       student_count: parseInt(form.student_count) || 0,
@@ -111,6 +126,7 @@ export function TurmasScreen() {
   const closeModal = () => {
     setShowModal(false);
     setEditing(null);
+    setFormErrors({});
   };
 
   const closeConfirmDialog = () => setConfirmDialog(EMPTY_CONFIRM_DIALOG);
@@ -144,20 +160,19 @@ export function TurmasScreen() {
       />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Turmas</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.secondary }]} onPress={openAdd}>
-          <Text style={styles.addBtnText}>+ Nova Turma</Text>
-        </TouchableOpacity>
+        {classes.length > 0 ? (
+          <ActionButton label="Nova turma" compact onPress={openAdd} />
+        ) : null}
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {classes.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <Text style={[styles.emptyIcon, { backgroundColor: colors.surfaceMuted, color: colors.primary }]}>TU</Text>
-            <Text style={[styles.emptyTitle, { color: colors.textMuted }]}>Nenhuma turma cadastrada</Text>
-            <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.secondary }]} onPress={openAdd}>
-              <Text style={styles.emptyBtnText}>+ Adicionar turma</Text>
-            </TouchableOpacity>
-          </View>
+          <EmptyState
+            title="Nenhuma turma cadastrada"
+            description="Cadastre suas turmas para organizar a agenda e identificar suas aulas com mais facilidade."
+            actionLabel="Adicionar turma"
+            onAction={openAdd}
+          />
         ) : (
           classes.map(c => (
             <TouchableOpacity
@@ -189,7 +204,9 @@ export function TurmasScreen() {
             </TouchableOpacity>
           ))
         )}
-        <Text style={[styles.hint, { color: colors.textMuted }]}>Toque para editar</Text>
+        {classes.length > 0 ? (
+          <Text style={[styles.hint, { color: colors.textMuted }]}>Toque para editar</Text>
+        ) : null}
         <View style={{ height: 80 }} />
       </ScrollView>
 
@@ -202,24 +219,19 @@ export function TurmasScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <SheetScrollView>
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Nome da turma *</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
             value={form.name}
-            onChangeText={v => setForm(f => ({ ...f, name: v }))}
+            onChangeText={v => {
+              setForm(f => ({ ...f, name: v }));
+              if (formErrors.name) setFormErrors(current => ({ ...current, name: undefined }));
+            }}
             placeholder="Ex: Primeiro ano B"
             placeholderTextColor={colors.textMuted}
           />
-
-          <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Série / Ano (opcional)</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-            value={form.grade}
-            onChangeText={v => setForm(f => ({ ...f, grade: v }))}
-            placeholder="Ex: Ensino Médio"
-            placeholderTextColor={colors.textMuted}
-          />
+          {formErrors.name ? <Text style={styles.errorText}>{formErrors.name}</Text> : null}
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Componente Curricular *</Text>
           <ScrollView
@@ -239,6 +251,7 @@ export function TurmasScreen() {
                 onPress={() => {
                   setCustomSubject(false);
                   setForm(f => ({ ...f, subject }));
+                  if (formErrors.subject) setFormErrors(current => ({ ...current, subject: undefined }));
                 }}
               >
                 <Text style={[styles.chipText, { color: colors.text }, !customSubject && form.subject === subject && { color: '#FFF' }]}>{subject}</Text>
@@ -253,6 +266,7 @@ export function TurmasScreen() {
               onPress={() => {
                 setCustomSubject(true);
                 setForm(f => ({ ...f, subject: '' }));
+                setFormErrors(current => ({ ...current, subject: undefined }));
               }}
             >
               <Text style={[styles.chipText, { color: colors.text }, customSubject && { color: '#FFF' }]}>Outra</Text>
@@ -262,11 +276,15 @@ export function TurmasScreen() {
             <TextInput
               style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
               value={form.subject}
-              onChangeText={v => setForm(f => ({ ...f, subject: v }))}
+              onChangeText={v => {
+                setForm(f => ({ ...f, subject: v }));
+                if (formErrors.subject) setFormErrors(current => ({ ...current, subject: undefined }));
+              }}
               placeholder="Ex: História"
               placeholderTextColor={colors.textMuted}
             />
           )}
+          {formErrors.subject ? <Text style={styles.errorText}>{formErrors.subject}</Text> : null}
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Quantidade de alunos</Text>
           <TextInput
@@ -297,13 +315,16 @@ export function TurmasScreen() {
             </TouchableOpacity>
           )}
           <View style={{ height: 40 }} />
-        </ScrollView>
+        </SheetScrollView>
       </BottomSheetModal>
 
       <ConfirmDialog
         visible={confirmDialog.visible}
         title={confirmDialog.title}
         message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        variant={confirmDialog.variant}
         onCancel={closeConfirmDialog}
         onConfirm={confirmAndClose}
       />
@@ -319,19 +340,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#EFEFEF',
   },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A2E' },
-  addBtn: { backgroundColor: '#14B8A6', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  addBtnText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
   body: { padding: 16 },
-  emptyBox: { alignItems: 'center', paddingVertical: 60 },
-  emptyIcon: {
-    width: 52, height: 52, borderRadius: 16,
-    textAlign: 'center', textAlignVertical: 'center',
-    backgroundColor: '#E0F7F4', color: '#0F4C81',
-    fontSize: 15, fontWeight: '800', marginBottom: 12,
-  },
-  emptyTitle: { fontSize: 16, color: '#888', marginBottom: 16 },
-  emptyBtn: { backgroundColor: '#14B8A6', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  emptyBtnText: { color: '#FFF', fontWeight: '600' },
   classCard: {
     flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 14, marginBottom: 12,
     borderWidth: 1, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6,
@@ -355,6 +364,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A2E' },
   saveBtn: { fontSize: 15, color: '#0F4C81', fontWeight: '700' },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  errorText: { color: '#C0392B', fontSize: 12, fontWeight: '700', marginTop: -8, marginBottom: 12 },
   optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   optionChip: {
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,

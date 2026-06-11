@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, StatusBar, Alert,
+  TextInput, StatusBar,
 } from 'react-native';
 import { BottomSheetModal } from '../../components/BottomSheetModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,13 +17,19 @@ import { ACTIVITY_TYPE_COLORS, getActivityTypeVisual } from '../../utils/colors'
 import { formatDate, daysFromNow, todayISO } from '../../utils/time';
 import { useAppTheme } from '../../theme';
 import { DatePickerField } from '../../components/DatePickerField';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { ConfirmDialog, type ConfirmDialogVariant } from '../../components/ConfirmDialog';
+import { ActionButton } from '../../components/ActionButton';
+import { EmptyState } from '../../components/EmptyState';
+import { SheetScrollView } from '../../components/SheetScrollView';
 
 const TABS = ['Atividades', 'Lembretes'];
 type ConfirmDialogState = {
   visible: boolean;
   title: string;
   message: string;
+  confirmLabel?: string;
+  cancelLabel?: string | null;
+  variant?: ConfirmDialogVariant;
   onConfirm: () => void | Promise<void>;
 };
 
@@ -32,6 +38,15 @@ const EMPTY_CONFIRM_DIALOG: ConfirmDialogState = {
   title: '',
   message: '',
   onConfirm: () => undefined,
+};
+
+type ActivityFormErrors = {
+  title?: string;
+  customTypeName?: string;
+};
+
+type ReminderFormErrors = {
+  title?: string;
 };
 
 function formatActivityTypeUsageMessage(count: number): string {
@@ -53,6 +68,8 @@ export function AtividadesScreen({ navigation, route }: any) {
   const [customTypeName, setCustomTypeName] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState(ACTIVITY_TYPE_COLORS[0]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(EMPTY_CONFIRM_DIALOG);
+  const [activityErrors, setActivityErrors] = useState<ActivityFormErrors>({});
+  const [reminderErrors, setReminderErrors] = useState<ReminderFormErrors>({});
 
   // Activity form
   const [aForm, setAForm] = useState({
@@ -71,16 +88,20 @@ export function AtividadesScreen({ navigation, route }: any) {
     setCustomTypeMode(false);
     setCustomTypeName('');
     setCustomTypeColor(ACTIVITY_TYPE_COLORS[0]);
+    setActivityErrors({});
   };
 
   const resetReminderForm = () => {
     setRForm({ title: '', description: '', date: todayISO() });
+    setReminderErrors({});
   };
 
   const closeModal = () => {
     setShowModal(false);
     setEditingActivity(null);
     setEditingReminder(null);
+    setActivityErrors({});
+    setReminderErrors({});
   };
 
   const closeConfirmDialog = () => setConfirmDialog(EMPTY_CONFIRM_DIALOG);
@@ -108,6 +129,7 @@ export function AtividadesScreen({ navigation, route }: any) {
     setEditingReminder(null);
     setCustomTypeMode(false);
     setCustomTypeName('');
+    setActivityErrors({});
     setAForm({
       class_id: activity.class_id,
       type: activity.type,
@@ -122,6 +144,7 @@ export function AtividadesScreen({ navigation, route }: any) {
     setTab(1);
     setEditingReminder(reminder);
     setEditingActivity(null);
+    setReminderErrors({});
     setRForm({
       title: reminder.title,
       description: reminder.description,
@@ -147,13 +170,18 @@ export function AtividadesScreen({ navigation, route }: any) {
   }, [load, navigation, route?.params?.initialTab]));
 
   const handleSaveActivity = async () => {
-    if (!aForm.title.trim()) { Alert.alert('Atenção', 'Informe o título'); return; }
+    const nextErrors: ActivityFormErrors = {
+      title: aForm.title.trim() ? undefined : 'Informe o título',
+      customTypeName: customTypeMode && !customTypeName.trim() ? 'Informe o nome do novo tipo' : undefined,
+    };
+
+    if (nextErrors.title || nextErrors.customTypeName) {
+      setActivityErrors(nextErrors);
+      return;
+    }
+
     let type = aForm.type;
     if (customTypeMode) {
-      if (!customTypeName.trim()) {
-        Alert.alert('Atenção', 'Informe o nome do novo tipo.');
-        return;
-      }
       const customType = await createActivityType(customTypeName, customTypeColor);
       type = customType.key;
     }
@@ -178,7 +206,15 @@ export function AtividadesScreen({ navigation, route }: any) {
   };
 
   const handleSaveReminder = async () => {
-    if (!rForm.title.trim()) { Alert.alert('Atenção', 'Informe o título'); return; }
+    const nextErrors: ReminderFormErrors = {
+      title: rForm.title.trim() ? undefined : 'Informe o título',
+    };
+
+    if (nextErrors.title) {
+      setReminderErrors(nextErrors);
+      return;
+    }
+
     const data = {
       title: rForm.title.trim(),
       description: rForm.description.trim(),
@@ -244,6 +280,8 @@ export function AtividadesScreen({ navigation, route }: any) {
 
   const inputTheme = { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border };
   const chipTheme = { backgroundColor: colors.surfaceMuted, borderColor: colors.border };
+  const hasCurrentItems = tab === 0 ? activities.length > 0 : reminders.length > 0;
+  const addButtonLabel = tab === 0 ? 'Nova atividade' : 'Novo lembrete';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
@@ -254,9 +292,9 @@ export function AtividadesScreen({ navigation, route }: any) {
       />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{TABS[tab]}</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.secondary }]} onPress={openAdd}>
-          <Text style={styles.addBtnText}>+ Novo</Text>
-        </TouchableOpacity>
+        {hasCurrentItems ? (
+          <ActionButton label={addButtonLabel} compact onPress={openAdd} />
+        ) : null}
       </View>
 
       {/* Tabs */}
@@ -279,10 +317,12 @@ export function AtividadesScreen({ navigation, route }: any) {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {tab === 0 ? (
           activities.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={[styles.emptyIcon, { backgroundColor: colors.surfaceMuted, color: colors.primary }]}>AT</Text>
-              <Text style={[styles.emptyTitle, { color: colors.textMuted }]}>Nenhuma atividade cadastrada</Text>
-            </View>
+            <EmptyState
+              title="Nenhuma atividade cadastrada"
+              description="Crie atividades, avaliações ou entregas para acompanhar sua rotina escolar."
+              actionLabel="Adicionar atividade"
+              onAction={openAdd}
+            />
           ) : (
             activities.map(a => {
               const cfg = getActivityTypeVisual(a);
@@ -335,10 +375,12 @@ export function AtividadesScreen({ navigation, route }: any) {
           )
         ) : (
           reminders.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={[styles.emptyIcon, { backgroundColor: colors.surfaceMuted, color: colors.primary }]}>LE</Text>
-              <Text style={[styles.emptyTitle, { color: colors.textMuted }]}>Nenhum lembrete cadastrado</Text>
-            </View>
+            <EmptyState
+              title="Nenhum lembrete cadastrado"
+              description="Adicione lembretes para não esquecer compromissos importantes."
+              actionLabel="Adicionar lembrete"
+              onAction={openAdd}
+            />
           ) : (
             reminders.map(r => (
               <TouchableOpacity
@@ -388,7 +430,7 @@ export function AtividadesScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <SheetScrollView>
             {tab === 0 ? (
               <>
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Tipo</Text>
@@ -410,6 +452,7 @@ export function AtividadesScreen({ navigation, route }: any) {
                         ]}
                         onPress={() => {
                           setCustomTypeMode(false);
+                          setActivityErrors(current => ({ ...current, customTypeName: undefined }));
                           setAForm(f => ({ ...f, type: t.key }));
                         }}
                         onLongPress={() => handleDeleteCustomType(t)}
@@ -440,10 +483,16 @@ export function AtividadesScreen({ navigation, route }: any) {
                     <TextInput
                       style={[styles.input, inputTheme]}
                       value={customTypeName}
-                      onChangeText={setCustomTypeName}
+                      onChangeText={value => {
+                        setCustomTypeName(value);
+                        if (activityErrors.customTypeName) {
+                          setActivityErrors(current => ({ ...current, customTypeName: undefined }));
+                        }
+                      }}
                       placeholder="Ex: Seminário, Recuperação..."
                       placeholderTextColor={colors.textMuted}
                     />
+                    {activityErrors.customTypeName ? <Text style={styles.errorText}>{activityErrors.customTypeName}</Text> : null}
                     <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Cor do tipo</Text>
                     <View style={styles.colorRow}>
                       {ACTIVITY_TYPE_COLORS.map(color => (
@@ -486,7 +535,17 @@ export function AtividadesScreen({ navigation, route }: any) {
                 </ScrollView>
 
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Título *</Text>
-                <TextInput style={[styles.input, inputTheme]} value={aForm.title} onChangeText={v => setAForm(f => ({ ...f, title: v }))} placeholder="Ex: AVS de Inglês — 7º A" placeholderTextColor={colors.textMuted} />
+                <TextInput
+                  style={[styles.input, inputTheme]}
+                  value={aForm.title}
+                  onChangeText={v => {
+                    setAForm(f => ({ ...f, title: v }));
+                    if (activityErrors.title) setActivityErrors(current => ({ ...current, title: undefined }));
+                  }}
+                  placeholder="Ex: AVS de Inglês — 7º A"
+                  placeholderTextColor={colors.textMuted}
+                />
+                {activityErrors.title ? <Text style={styles.errorText}>{activityErrors.title}</Text> : null}
 
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Descrição</Text>
                 <TextInput style={[styles.input, inputTheme, { minHeight: 60 }]} value={aForm.description} onChangeText={v => setAForm(f => ({ ...f, description: v }))} placeholder="Detalhes..." placeholderTextColor={colors.textMuted} multiline />
@@ -500,7 +559,17 @@ export function AtividadesScreen({ navigation, route }: any) {
             ) : (
               <>
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Título *</Text>
-                <TextInput style={[styles.input, inputTheme]} value={rForm.title} onChangeText={v => setRForm(f => ({ ...f, title: v }))} placeholder="Ex: Elaborar guias bimestrais" placeholderTextColor={colors.textMuted} />
+                <TextInput
+                  style={[styles.input, inputTheme]}
+                  value={rForm.title}
+                  onChangeText={v => {
+                    setRForm(f => ({ ...f, title: v }));
+                    if (reminderErrors.title) setReminderErrors(current => ({ ...current, title: undefined }));
+                  }}
+                  placeholder="Ex: Elaborar guias bimestrais"
+                  placeholderTextColor={colors.textMuted}
+                />
+                {reminderErrors.title ? <Text style={styles.errorText}>{reminderErrors.title}</Text> : null}
 
                 <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Descrição</Text>
                 <TextInput style={[styles.input, inputTheme, { minHeight: 60 }]} value={rForm.description} onChangeText={v => setRForm(f => ({ ...f, description: v }))} placeholder="Detalhes..." placeholderTextColor={colors.textMuted} multiline />
@@ -513,13 +582,16 @@ export function AtividadesScreen({ navigation, route }: any) {
               </>
             )}
             <View style={{ height: 40 }} />
-          </ScrollView>
+          </SheetScrollView>
       </BottomSheetModal>
 
       <ConfirmDialog
         visible={confirmDialog.visible}
         title={confirmDialog.title}
         message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        variant={confirmDialog.variant}
         onCancel={closeConfirmDialog}
         onConfirm={confirmAndClose}
       />
@@ -535,22 +607,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#EFEFEF',
   },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A2E' },
-  addBtn: { backgroundColor: '#14B8A6', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  addBtnText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
   tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#EFEFEF', backgroundColor: '#FFF' },
   tabItem: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   tabItemActive: { borderBottomWidth: 2, borderBottomColor: '#0F4C81' },
   tabText: { fontSize: 14, color: '#888', fontWeight: '500' },
   tabTextActive: { color: '#0F4C81', fontWeight: '700' },
   body: { padding: 16 },
-  emptyBox: { alignItems: 'center', paddingVertical: 60 },
-  emptyIcon: {
-    width: 52, height: 52, borderRadius: 16,
-    textAlign: 'center', textAlignVertical: 'center',
-    backgroundColor: '#E0F7F4', color: '#0F4C81',
-    fontSize: 15, fontWeight: '800', marginBottom: 12,
-  },
-  emptyTitle: { fontSize: 16, color: '#888' },
   actCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
     backgroundColor: '#FFF', borderRadius: 12, padding: 14, marginBottom: 10,
@@ -584,6 +646,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A2E' },
   saveBtn: { fontSize: 15, color: '#0F4C81', fontWeight: '700' },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  errorText: { color: '#C0392B', fontSize: 12, fontWeight: '700', marginTop: -8, marginBottom: 12 },
   input: {
     backgroundColor: '#FFF', borderRadius: 10, padding: 12, fontSize: 14,
     color: '#333', borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 14,

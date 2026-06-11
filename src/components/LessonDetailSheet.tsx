@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { Lesson } from '../types';
 import { useAppTheme } from '../theme';
 import { formatLessonActivities } from '../utils/lessonActivities';
+import { hasPendingLessonContent, isLessonContentPrepared } from '../utils/lessonContent';
 import { BottomSheetModal } from './BottomSheetModal';
 
 type Props = {
@@ -17,6 +18,11 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
 
   if (!lesson) return null;
   const activities = formatLessonActivities(lesson.activity);
+  const isReserved = lesson.kind === 'reserved';
+  const hasPendingContent = hasPendingLessonContent(lesson);
+  const title = isReserved
+    ? lesson.title || 'Horário reservado'
+    : `${lesson.class_name ?? 'Turma'} · ${lesson.subject ?? 'Componente Curricular'}`;
 
   return (
     <BottomSheetModal
@@ -31,36 +37,70 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
               {lesson.start_time} - {lesson.end_time}
             </Text>
             <Text style={[styles.detailTitle, { color: colors.text }]}>
-              {lesson.class_name} · {lesson.subject}
+              {title}
             </Text>
           </View>
           <View style={[styles.colorDot, { backgroundColor: lesson.class_color || colors.primary }]} />
         </View>
 
+        {!isReserved && (
+          <View
+            style={[
+              styles.pendingBanner,
+              {
+                backgroundColor: isLessonContentPrepared(lesson)
+                  ? (colors.mode === 'dark' ? '#114B3E' : '#E8F8F5')
+                  : (colors.mode === 'dark' ? '#4A3412' : '#FFF4D6')
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.pendingBannerText,
+                {
+                  color: isLessonContentPrepared(lesson)
+                    ? (colors.mode === 'dark' ? '#1ABC9C' : '#0E6251')
+                    : (colors.mode === 'dark' ? '#FFB74D' : '#9A5B00')
+                }
+              ]}
+            >
+              {isLessonContentPrepared(lesson) ? 'Aula preparada' : 'Aula não preparada'}
+            </Text>
+          </View>
+        )}
+
         <View style={[styles.detailBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Conteúdo</Text>
-          <Text style={[styles.detailText, { color: colors.text }]}>{lesson.content || 'Sem conteúdo definido'}</Text>
+          <Text style={[styles.detailLabel, { color: colors.textMuted }]}>
+            {isReserved ? 'Tipo' : 'Conteúdo'}
+          </Text>
+          <Text style={[styles.detailText, { color: colors.text }]}>
+            {isReserved ? 'Evento institucional' : lesson.content || 'Sem conteúdo definido'}
+          </Text>
         </View>
 
-        <View style={styles.detailGrid}>
-          <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Atividade</Text>
-            <Text style={[styles.detailText, { color: colors.text }]}>{activities || 'Sem atividade'}</Text>
+        {!isReserved && (
+          <View style={styles.detailGrid}>
+            <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Atividade</Text>
+              <Text style={[styles.detailText, { color: colors.text }]}>{activities || 'Sem atividade'}</Text>
+            </View>
+            <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Status</Text>
+              <Text style={[styles.detailText, { color: colors.text }]}>{lesson.status || 'Sem status'}</Text>
+            </View>
           </View>
-          <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Status</Text>
-            <Text style={[styles.detailText, { color: colors.text }]}>{lesson.status || 'Sem status'}</Text>
-          </View>
-        </View>
+        )}
 
-        <View style={[styles.detailBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Observações</Text>
-          <Text style={[styles.detailText, { color: colors.text }]}>{lesson.notes || 'Sem observações'}</Text>
-        </View>
+        {!isReserved && (
+          <View style={[styles.detailBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Observações</Text>
+            <Text style={[styles.detailText, { color: colors.text }]}>{lesson.notes || 'Sem observações'}</Text>
+          </View>
+        )}
 
         {(onEdit || onDelete) && (
           <View style={styles.actionRow}>
-            {onEdit && (
+            {onEdit && !isReserved && (
               <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.primary }]} onPress={() => onEdit(lesson)}>
                 <Text style={styles.primaryBtnText}>Editar</Text>
               </TouchableOpacity>
@@ -85,6 +125,18 @@ const styles = StyleSheet.create({
   detailTime: { fontSize: 12, fontWeight: '700', marginBottom: 3 },
   detailTitle: { fontSize: 18, fontWeight: '700' },
   colorDot: { width: 16, height: 16, borderRadius: 8 },
+  pendingBanner: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  pendingBannerText: {
+    color: '#9A5B00',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   detailBlock: {
     borderRadius: 10,
     borderWidth: 1,

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, StatusBar, Alert,
+  TextInput, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -23,8 +23,11 @@ import { BottomSheetModal } from '../../components/BottomSheetModal';
 import { LessonDetailSheet } from '../../components/LessonDetailSheet';
 import { TimeInput } from '../../components/TimeInput';
 import { LessonActivitySelector } from '../../components/LessonActivitySelector';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { ConfirmDialog, type ConfirmDialogVariant } from '../../components/ConfirmDialog';
+import { PreparedContentToggle } from '../../components/PreparedContentToggle';
 import { LESSON_STATUS_OPTIONS, normalizeLessonStatus, parseLessonActivities, stringifyLessonActivities } from '../../utils/lessonActivities';
+import { SheetScrollView } from '../../components/SheetScrollView';
+import { ScheduleImportSheet } from '../../components/ScheduleImportSheet';
 
 type LessonForm = {
   class_id: number;
@@ -36,14 +39,23 @@ type LessonForm = {
   methodology: string;
   status: string;
   notes: string;
+  conteudo_preparado: number;
 };
 
 type LessonSlot = { start: string; end: string; label: string };
 type AgendaViewMode = 'week' | 'month';
+type LessonFormErrors = {
+  class_id?: string;
+  slots?: string;
+  time?: string;
+};
 type ConfirmDialogState = {
   visible: boolean;
   title: string;
   message: string;
+  confirmLabel?: string;
+  cancelLabel?: string | null;
+  variant?: ConfirmDialogVariant;
   onConfirm: () => void | Promise<void>;
 };
 
@@ -75,6 +87,7 @@ function emptyLessonForm(weekday: number, classId = 0): LessonForm {
     methodology: '',
     status: 'Pendente',
     notes: '',
+    conteudo_preparado: 0,
   };
 }
 
@@ -112,12 +125,14 @@ export function AgendaScreen({ navigation, route }: any) {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [showModal, setShowModal] = useState(false);
+  const [showImportSheet, setShowImportSheet] = useState(false);
   const [detailLesson, setDetailLesson] = useState<Lesson | null>(null);
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
   // Slots selecionados para cadastro múltiplo (Set de 'start_time')
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
   const [multiSlotEnabled, setMultiSlotEnabled] = useState(false);
   const [form, setForm] = useState<LessonForm>(() => emptyLessonForm(getCurrentWeekday()));
+  const [formErrors, setFormErrors] = useState<LessonFormErrors>({});
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(EMPTY_CONFIRM_DIALOG);
   const weekDates = getCurrentWeekDates();
   const selectedWeekDate = useMemo(() => getCurrentWeekDateForWeekday(selectedDay), [selectedDay]);
@@ -239,6 +254,7 @@ export function AgendaScreen({ navigation, route }: any) {
 
   const resetForm = (weekday = activeWeekday ?? selectedDay) => {
     setForm(emptyLessonForm(weekday, classes[0]?.id ?? form.class_id));
+    setFormErrors({});
   };
 
   const selectMonthDay = (date: Date) => {
@@ -266,7 +282,7 @@ export function AgendaScreen({ navigation, route }: any) {
 
   const openAdd = (slot?: LessonSlot) => {
     if (activeWeekday === null) {
-      Alert.alert('Dia sem aulas', 'Selecione um dia útil para cadastrar aulas.');
+      showInfoDialog('Dia sem aulas', 'Selecione um dia útil para cadastrar aulas.');
       return;
     }
 
@@ -276,6 +292,7 @@ export function AgendaScreen({ navigation, route }: any) {
     setMultiSlotEnabled(false);
     // Pré-selecionar o slot tocado, se houver
     setSelectedSlotKeys(slot ? new Set([slot.start]) : new Set());
+    setFormErrors({});
     setForm({
       ...next,
       start_time: slot?.start ?? next.start_time,
@@ -289,8 +306,9 @@ export function AgendaScreen({ navigation, route }: any) {
     setDetailLesson(null);
     setMultiSlotEnabled(false);
     setSelectedSlotKeys(new Set([lesson.start_time]));
+    setFormErrors({});
     setForm({
-      class_id: lesson.class_id,
+      class_id: lesson.class_id ?? 0,
       weekday: lesson.weekday,
       start_time: lesson.start_time,
       end_time: lesson.end_time,
@@ -299,13 +317,22 @@ export function AgendaScreen({ navigation, route }: any) {
       methodology: lesson.methodology,
       status: normalizeLessonStatus(lesson.status),
       notes: lesson.notes,
+      conteudo_preparado: lesson.conteudo_preparado ?? 0,
     });
     setShowModal(true);
+  };
+
+  const openImport = () => {
+    setDetailLesson(null);
+    setEditingLesson(null);
+    setShowModal(false);
+    setShowImportSheet(true);
   };
 
   const closeForm = () => {
     setShowModal(false);
     setEditingLesson(null);
+    setFormErrors({});
   };
 
   const closeDetail = () => {
@@ -320,6 +347,18 @@ export function AgendaScreen({ navigation, route }: any) {
     await action();
   };
 
+  const showInfoDialog = (title: string, message: string) => {
+    setConfirmDialog({
+      visible: true,
+      title,
+      message,
+      confirmLabel: 'OK',
+      cancelLabel: null,
+      variant: 'info',
+      onConfirm: () => undefined,
+    });
+  };
+
   const getLessonBlocks = (): LessonSlot[] | null => {
     const start = form.start_time.trim();
     const end = form.end_time.trim();
@@ -332,10 +371,7 @@ export function AgendaScreen({ navigation, route }: any) {
     // Modo múltiplos horários: usar os slots selecionados
     if (multiSlotEnabled && selectedSlotKeys.size > 0) {
       const selected = slots.filter(slot => selectedSlotKeys.has(slot.start));
-      if (selected.length === 0) {
-        Alert.alert('Atenção', 'Selecione ao menos um horário.');
-        return null;
-      }
+      if (selected.length === 0) return null;
       return selected;
     }
 
@@ -348,22 +384,34 @@ export function AgendaScreen({ navigation, route }: any) {
   };
 
   const handleSave = async () => {
+    const nextErrors: LessonFormErrors = {};
+
     if (form.class_id === 0) {
-      Alert.alert('Atenção', 'Cadastre ou selecione uma turma para a aula.');
-      return;
-    }
-    if (!form.start_time.trim() || !form.end_time.trim()) {
-      Alert.alert('Atenção', 'Informe o horário de início e término.');
-      return;
+      nextErrors.class_id = 'Cadastre ou selecione uma turma para a aula';
     }
 
-    if (!isCompleteTime(form.start_time.trim()) || !isCompleteTime(form.end_time.trim())) {
-      Alert.alert('Atenção', 'Use o formato HH:MM para os horários.');
+    if (multiSlotEnabled && !editingLesson && selectedSlotKeys.size === 0) {
+      nextErrors.slots = 'Selecione ao menos um horário';
+    }
+
+    if (!multiSlotEnabled || editingLesson) {
+      if (!form.start_time.trim() || !form.end_time.trim()) {
+        nextErrors.time = 'Informe o horário de início e término';
+      } else if (!isCompleteTime(form.start_time.trim()) || !isCompleteTime(form.end_time.trim())) {
+        nextErrors.time = 'Use o formato HH:MM para os horários';
+      }
+    }
+
+    if (nextErrors.class_id || nextErrors.slots || nextErrors.time) {
+      setFormErrors(nextErrors);
       return;
     }
 
     const blocks = getLessonBlocks();
-    if (!blocks) return;
+    if (!blocks) {
+      setFormErrors(current => ({ ...current, slots: 'Selecione ao menos um horário' }));
+      return;
+    }
 
     const data = {
       ...form,
@@ -389,6 +437,7 @@ export function AgendaScreen({ navigation, route }: any) {
       methodology: data.methodology,
       status: data.status,
       notes: data.notes,
+      conteudo_preparado: data.conteudo_preparado,
     };
 
     if (editingLesson) {
@@ -685,8 +734,24 @@ export function AgendaScreen({ navigation, route }: any) {
           </Text>
         </View>
 
-        {/* Segment control – compacto, no canto direito do header */}
-        {renderSegmentControl()}
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[
+              styles.importButton,
+              {
+                backgroundColor: colors.surfaceMuted,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={openImport}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.importButtonText, { color: colors.primary }]}>Importar</Text>
+          </TouchableOpacity>
+
+          {/* Segment control – compacto, no canto direito do header */}
+          {renderSegmentControl()}
+        </View>
       </View>
 
       {/* ── WEEK DAY TABS ── */}
@@ -815,6 +880,16 @@ export function AgendaScreen({ navigation, route }: any) {
         onDelete={handleDelete}
       />
 
+      <ScheduleImportSheet
+        visible={showImportSheet}
+        monthKey={activeMonthKey}
+        onClose={() => setShowImportSheet(false)}
+        onImported={async message => {
+          await load();
+          showInfoDialog('Importação concluída', message);
+        }}
+      />
+
       {/* ── ADD / EDIT FORM ── */}
       <BottomSheetModal visible={showModal} onClose={closeForm} maxHeight="88%">
         <View style={styles.sheetHeader}>
@@ -824,7 +899,7 @@ export function AgendaScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <SheetScrollView>
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Dia da semana</Text>
           <View style={styles.weekdayRow}>
             {WEEKDAY_LABELS.map((label, i) => (
@@ -863,7 +938,10 @@ export function AgendaScreen({ navigation, route }: any) {
                       borderColor: classItem.color,
                     },
                   ]}
-                  onPress={() => setForm(current => ({ ...current, class_id: classItem.id }))}
+                  onPress={() => {
+                    setForm(current => ({ ...current, class_id: classItem.id }));
+                    if (formErrors.class_id) setFormErrors(current => ({ ...current, class_id: undefined }));
+                  }}
                 >
                   <Text style={[styles.chipText, { color: colors.text }, form.class_id === classItem.id && { color: '#FFF' }]}>
                     {classItem.name}
@@ -872,6 +950,7 @@ export function AgendaScreen({ navigation, route }: any) {
               ))}
             </ScrollView>
           )}
+          {formErrors.class_id ? <Text style={styles.errorText}>{formErrors.class_id}</Text> : null}
 
           {!editingLesson && (
             <>
@@ -885,10 +964,12 @@ export function AgendaScreen({ navigation, route }: any) {
                 onPress={() => {
                   const next = !multiSlotEnabled;
                   setMultiSlotEnabled(next);
+                  setFormErrors(current => ({ ...current, slots: undefined, time: undefined }));
                   if (next) {
                     const currentSlot = slots.find(s => s.start === form.start_time);
                     if (currentSlot) {
                       setSelectedSlotKeys(new Set([currentSlot.start]));
+                      if (formErrors.slots) setFormErrors(current => ({ ...current, slots: undefined }));
                     }
                   }
                 }}
@@ -932,6 +1013,7 @@ export function AgendaScreen({ navigation, route }: any) {
                             else next.add(slot.start);
                             return next;
                           });
+                          if (formErrors.slots) setFormErrors(current => ({ ...current, slots: undefined }));
                         }}
                         activeOpacity={0.75}
                       >
@@ -973,11 +1055,14 @@ export function AgendaScreen({ navigation, route }: any) {
                             borderColor: colors.primary,
                           },
                         ]}
-                        onPress={() => setForm(current => ({
-                          ...current,
-                          start_time: slot.start,
-                          end_time: slot.end,
-                        }))}
+                        onPress={() => {
+                          setForm(current => ({
+                            ...current,
+                            start_time: slot.start,
+                            end_time: slot.end,
+                          }));
+                          if (formErrors.time) setFormErrors(current => ({ ...current, time: undefined }));
+                        }}
                       >
                         <Text style={[styles.timeChipLabel, { color: colors.textMuted }, active && { color: colors.primary }]}>{slot.label}</Text>
                         <Text style={[styles.timeChipText, { color: colors.text }, active && { color: colors.primary }]}>
@@ -988,6 +1073,7 @@ export function AgendaScreen({ navigation, route }: any) {
                   })}
                 </ScrollView>
               )}
+              {formErrors.slots ? <Text style={styles.errorText}>{formErrors.slots}</Text> : null}
             </>
           )}
 
@@ -998,7 +1084,10 @@ export function AgendaScreen({ navigation, route }: any) {
               <TimeInput
                 style={[styles.timeInput, inputTheme, { color: colors.primary, borderColor: colors.primary }]}
                 value={form.start_time}
-                onChangeText={value => setForm(current => ({ ...current, start_time: value }))}
+                onChangeText={value => {
+                  setForm(current => ({ ...current, start_time: value }));
+                  if (formErrors.time) setFormErrors(current => ({ ...current, time: undefined }));
+                }}
                 placeholder="07:30"
                 placeholderTextColor={colors.textMuted}
               />
@@ -1008,13 +1097,17 @@ export function AgendaScreen({ navigation, route }: any) {
               <TimeInput
                 style={[styles.timeInput, inputTheme, { color: colors.primary, borderColor: colors.primary }]}
                 value={form.end_time}
-                onChangeText={value => setForm(current => ({ ...current, end_time: value }))}
+                onChangeText={value => {
+                  setForm(current => ({ ...current, end_time: value }));
+                  if (formErrors.time) setFormErrors(current => ({ ...current, time: undefined }));
+                }}
                 placeholder="08:18"
                 placeholderTextColor={colors.textMuted}
               />
             </View>
           </View>
           )}
+          {formErrors.time ? <Text style={styles.errorText}>{formErrors.time}</Text> : null}
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Conteúdo</Text>
           <TextInput
@@ -1024,6 +1117,14 @@ export function AgendaScreen({ navigation, route }: any) {
             placeholder="Ex: Verbo To Be - afirmativo e negativo"
             placeholderTextColor={colors.textMuted}
             multiline
+          />
+
+          <PreparedContentToggle
+            value={form.conteudo_preparado === 1}
+            onChange={value => setForm(current => ({
+              ...current,
+              conteudo_preparado: value ? 1 : 0,
+            }))}
           />
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Atividade</Text>
@@ -1081,13 +1182,16 @@ export function AgendaScreen({ navigation, route }: any) {
           )}
 
           <View style={{ height: 40 }} />
-        </ScrollView>
+        </SheetScrollView>
       </BottomSheetModal>
 
       <ConfirmDialog
         visible={confirmDialog.visible}
         title={confirmDialog.title}
         message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        variant={confirmDialog.variant}
         onCancel={closeConfirmDialog}
         onConfirm={confirmAndClose}
       />
@@ -1110,6 +1214,21 @@ const styles = StyleSheet.create({
   headerLeft: { flex: 1 },
   headerTitle: { fontSize: 20, fontWeight: '700' },
   headerSub: { fontSize: 12, marginTop: 2 },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  importButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  importButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
 
   // ── Segment Control ──
   segmentWrap: {
@@ -1281,6 +1400,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 18, fontWeight: '700' },
   saveBtn: { fontSize: 15, fontWeight: '700' },
   fieldLabel: { fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase' },
+  errorText: { color: '#C0392B', fontSize: 12, fontWeight: '700', marginTop: -6, marginBottom: 12 },
   weekdayRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   weekdayChip: {
     flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10,

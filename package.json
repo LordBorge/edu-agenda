@@ -4,14 +4,20 @@
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "start:dev": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "dev-build:android": "cross-env JAVA_HOME=\"C:\\Program Files\\Android\\Android Studio\\jbr\" ANDROID_HOME=\"C:\\Users\\User\\AppData\\Local\\Android\\Sdk\" ANDROID_SDK_ROOT=\"C:\\Users\\User\\AppData\\Local\\Android\\Sdk\" expo run:android",
+    "dev-build:ios": "expo run:ios"
   },
   "dependencies": {
+    "@react-native-ml-kit/text-recognition": "^2.0.0",
     "@react-navigation/bottom-tabs": "^6.5.20",
     "@react-navigation/native": "^6.1.17",
     "expo": "^54.0.0",
+    "expo-document-picker": "~14.0.8",
+    "expo-image-picker": "~17.0.11",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",

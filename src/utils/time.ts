@@ -48,6 +48,10 @@ export interface ScheduleSlotOptions {
   period: SchedulePeriod;
   startTime: string;
   endTime: string;
+  morningStartTime?: string;
+  morningEndTime?: string;
+  afternoonStartTime?: string;
+  afternoonEndTime?: string;
   lessonDuration: number;
   breakDuration: number;
   breakAfterLesson: number;
@@ -109,6 +113,10 @@ function generateSlotsForWindow({
 export function generateScheduleSlots(options: ScheduleSlotOptions): ScheduleSlot[] {
   const start = timeToMinutes(options.startTime);
   const end = timeToMinutes(options.endTime);
+  const morningStart = timeToMinutes(options.morningStartTime ?? options.startTime);
+  const morningEnd = timeToMinutes(options.morningEndTime ?? options.lunchStart);
+  const afternoonStart = timeToMinutes(options.afternoonStartTime ?? options.lunchStart);
+  const afternoonEnd = timeToMinutes(options.afternoonEndTime ?? options.endTime);
   const lessonDuration = Math.max(options.lessonDuration, 1);
   const morningBreakDuration = Math.max(options.breakDuration, 0);
   const morningBreakAfter = Math.max(options.breakAfterLesson, 0);

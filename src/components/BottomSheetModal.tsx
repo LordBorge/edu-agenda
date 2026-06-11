@@ -8,6 +8,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../theme';
 
 type BottomSheetPresentation = 'sheet' | 'floating';
@@ -32,6 +33,8 @@ export function BottomSheetModal({
   sheetStyle,
 }: Props) {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const safeBottom = Math.max(insets.bottom, 14);
 
   const panResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_, gesture) => (
@@ -45,25 +48,41 @@ export function BottomSheetModal({
   }), [onClose]);
 
   return (
-    <Modal visible={visible} transparent animationType={animationType} onRequestClose={onClose}>
-      <View style={[styles.root, presentation === 'floating' && styles.floatingRoot]}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={animationType}
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.root}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
         <View
           style={[
-            styles.sheet,
-            presentation === 'floating' ? styles.floatingSheet : styles.bottomSheet,
-            {
-              backgroundColor: colors.background,
-              borderColor: colors.border,
-              maxHeight,
-            },
-            sheetStyle,
+            presentation === 'floating' && styles.floatingRoot,
+            presentation === 'floating' && { paddingBottom: safeBottom },
           ]}
         >
-          <View style={styles.dragZone} {...panResponder.panHandlers}>
-            <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          <View
+            style={[
+              styles.sheet,
+              presentation === 'floating' ? styles.floatingSheet : styles.bottomSheet,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                maxHeight,
+                paddingBottom: presentation === 'floating' ? 22 : safeBottom + 22,
+              },
+              sheetStyle,
+            ]}
+          >
+            <View style={styles.dragZone} {...panResponder.panHandlers}>
+              <View style={[styles.handle, { backgroundColor: colors.border }]} />
+            </View>
+            <View style={styles.content}>
+              {children}
+            </View>
           </View>
-          {children}
         </View>
       </View>
     </Modal>
@@ -84,6 +103,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.38)',
   },
   sheet: {
+    overflow: 'hidden',
     paddingHorizontal: 20,
     paddingBottom: 40,
     shadowColor: '#000',
@@ -91,6 +111,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 18,
     elevation: 12,
+  },
+  content: {
+    flexShrink: 1,
+    minHeight: 0,
   },
   bottomSheet: {
     borderTopLeftRadius: 24,

@@ -3,7 +3,7 @@
 EduAgenda e um aplicativo mobile para planejamento pedagogico, organizacao de aulas, turmas, atividades, lembretes e horarios escolares. O app foi desenvolvido com React Native, Expo e SQLite local, funcionando offline no dispositivo.
 
 <p align="center">
-  <img src="./assets/splash-logo.png" width="280" alt="Logo EduAgenda" />
+  <img src="./assets/icon.png" width="160" alt="Logo EduAgenda" />
 </p>
 
 ## Status

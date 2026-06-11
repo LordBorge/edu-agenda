@@ -12,13 +12,16 @@ export interface Class {
 }
 
 export type Weekday = 0 | 1 | 2 | 3 | 4;
+export type LessonKind = 'class' | 'reserved';
 
 export interface Lesson {
   id: number;
-  class_id: number;
+  class_id: number | null;
   class_name?: string;
   class_color?: string;
   subject?: string;
+  kind?: LessonKind;
+  title?: string;
   schedule_month?: string;
   weekday: Weekday;
   start_time: string;
@@ -28,6 +31,7 @@ export interface Lesson {
   methodology: string;
   status?: string;
   notes: string;
+  conteudo_preparado?: number;
   created_at: string;
 }
 
@@ -40,6 +44,7 @@ export interface LessonEntry {
   methodology: string;
   status: string;
   notes: string;
+  conteudo_preparado: number;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +98,10 @@ export interface ScheduleSettings {
   period: SchedulePeriod;
   start_time: string;
   end_time: string;
+  morning_start_time: string;
+  morning_end_time: string;
+  afternoon_start_time: string;
+  afternoon_end_time: string;
   lesson_duration: number;
   break_duration: number;
   break_after_lesson: number;

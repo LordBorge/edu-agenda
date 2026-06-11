@@ -1,0 +1,563 @@
+﻿import React, { useCallback, useState } from 'react';
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  TextInput, StatusBar, Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  getProfessionalProfile,
+  getScheduleSettingsForPeriod,
+  updateProfessionalProfile,
+  updateScheduleSettings,
+} from '../../database/queries';
+import { SchedulePeriod, ScheduleSettings, ThemePreference } from '../../types';
+import { generateScheduleSlots, isCompleteTime, ScheduleSlot } from '../../utils/time';
+import { useAppTheme } from '../../theme';
+import { TimeInput } from '../../components/TimeInput';
+
+type SettingsForm = Omit<ScheduleSettings, 'id'>;
+type ProfileForm = { name: string; subjects: string; work_periods: string; theme_preference: ThemePreference };
+
+const PERIODS: Array<{ key: SchedulePeriod; label: string }> = [
+  { key: 'integral', label: 'Integral' },
+  { key: 'manha', label: 'Manh├ú' },
+  { key: 'tarde', label: 'Tarde' },
+];
+
+const DEFAULT_FORM: SettingsForm = {
+  period: 'integral',
+  start_time: '07:30',
+  end_time: '17:00',
+  lesson_duration: 48,
+  break_duration: 20,
+  break_after_lesson: 2,
+  lunch_start: '12:00',
+  lunch_duration: 60,
+  afternoon_break_duration: 20,
+  afternoon_break_after_lesson: 3,
+};
+
+const DEFAULT_PROFILE: ProfileForm = {
+  name: '',
+  subjects: '',
+  work_periods: 'integral',
+  theme_preference: 'system',
+};
+
+const THEME_OPTIONS: Array<{ key: ThemePreference; label: string }> = [
+  { key: 'system', label: 'Sistema' },
+  { key: 'light', label: 'Claro' },
+  { key: 'dark', label: 'Escuro' },
+];
+
+function buildSlots(form: SettingsForm): ScheduleSlot[] {
+  return generateScheduleSlots({
+    period: form.period,
+    startTime: form.start_time,
+    endTime: form.end_time,
+    lessonDuration: form.lesson_duration,
+    breakDuration: form.break_duration,
+    breakAfterLesson: form.break_after_lesson,
+    lunchStart: form.lunch_start,
+    lunchDuration: form.lunch_duration,
+    afternoonBreakDuration: form.afternoon_break_duration,
+    afternoonBreakAfterLesson: form.afternoon_break_after_lesson,
+  });
+}
+
+function formFromSettings(settings: ScheduleSettings): SettingsForm {
+  return {
+    period: settings.period,
+    start_time: settings.start_time,
+    end_time: settings.end_time,
+    lesson_duration: settings.lesson_duration,
+    break_duration: settings.break_duration,
+    break_after_lesson: settings.break_after_lesson,
+    lunch_start: settings.lunch_start,
+    lunch_duration: settings.lunch_duration,
+    afternoon_break_duration: settings.afternoon_break_duration,
+    afternoon_break_after_lesson: settings.afternoon_break_after_lesson,
+  };
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'ED';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function normalizeWorkPeriod(workPeriods: string): SchedulePeriod {
+  const periods = workPeriods.split(',').filter(Boolean) as SchedulePeriod[];
+  if (periods.includes('integral')) return 'integral';
+  if (periods.includes('manha') && periods.includes('tarde')) return 'integral';
+  return periods[0] ?? 'integral';
+}
+
+export function PerfilScreen() {
+  const { colors, setPreference } = useAppTheme();
+  const [form, setForm] = useState<SettingsForm>(DEFAULT_FORM);
+  const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE);
+  const [slots, setSlots] = useState<ScheduleSlot[]>(() => buildSlots(DEFAULT_FORM));
+  const [saved, setSaved] = useState(false);
+
+  const commitForm = (next: SettingsForm) => {
+    setForm(next);
+    setSaved(false);
+    setSlots(buildSlots(next));
+  };
+
+  const load = useCallback(async () => {
+    const profile = await getProfessionalProfile();
+    const period = normalizeWorkPeriod(profile.work_periods);
+    const settings = await getScheduleSettingsForPeriod(period);
+    const next = formFromSettings(settings);
+    setForm(next);
+    setProfileForm({
+      name: profile.name,
+      subjects: profile.subjects,
+      work_periods: period,
+      theme_preference: profile.theme_preference ?? 'system',
+    });
+    setSlots(buildSlots(next));
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const handlePeriodChange = async (period: SchedulePeriod) => {
+    const settings = await getScheduleSettingsForPeriod(period);
+    setProfileForm(current => ({ ...current, work_periods: period }));
+    commitForm(formFromSettings(settings));
+  };
+
+  const updateField = (key: keyof SettingsForm, value: string | number) => {
+    commitForm({ ...form, [key]: value } as SettingsForm);
+  };
+
+  const updateNumberField = (
+    key: 'lesson_duration' | 'break_duration' | 'break_after_lesson' |
+      'lunch_duration' | 'afternoon_break_duration' | 'afternoon_break_after_lesson',
+    value: string
+  ) => {
+    const parsed = parseInt(value, 10);
+    updateField(key, Number.isNaN(parsed) ? 0 : parsed);
+  };
+
+  const handleSave = async () => {
+    const timeFields = [
+      { label: 'hor├írio de in├¡cio do dia', value: form.start_time },
+      { label: 'hor├írio de t├®rmino do dia', value: form.end_time },
+      ...(form.period === 'integral' ? [{ label: 'hor├írio de in├¡cio do almo├ºo', value: form.lunch_start }] : []),
+    ];
+    const invalidTime = timeFields.find(field => !isCompleteTime(field.value));
+
+    if (invalidTime) {
+      Alert.alert('Aten├º├úo', `Informe o ${invalidTime.label} no formato HH:MM.`);
+      return;
+    }
+
+    await Promise.all([
+      updateScheduleSettings(form),
+      updateProfessionalProfile({
+        name: profileForm.name.trim(),
+        subjects: profileForm.subjects.trim(),
+        work_periods: normalizeWorkPeriod(profileForm.work_periods),
+        theme_preference: profileForm.theme_preference,
+        onboarded: 1,
+      }),
+    ]);
+    const [persistedSettings, persistedProfile] = await Promise.all([
+      getScheduleSettingsForPeriod(form.period),
+      getProfessionalProfile(),
+    ]);
+    const persisted = formFromSettings(persistedSettings);
+    setForm(persisted);
+    setProfileForm({
+      name: persistedProfile.name,
+      subjects: persistedProfile.subjects,
+      work_periods: normalizeWorkPeriod(persistedProfile.work_periods),
+      theme_preference: persistedProfile.theme_preference ?? 'system',
+    });
+    setSlots(buildSlots(persisted));
+    setPreference(persistedProfile.theme_preference ?? 'system');
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleThemeChange = async (themePreference: ThemePreference) => {
+    setSaved(false);
+    setPreference(themePreference);
+    setProfileForm(current => ({ ...current, theme_preference: themePreference }));
+
+    const persistedProfile = await getProfessionalProfile();
+    await updateProfessionalProfile({
+      name: persistedProfile.name,
+      subjects: persistedProfile.subjects,
+      work_periods: persistedProfile.work_periods,
+      theme_preference: themePreference,
+      onboarded: persistedProfile.onboarded || 1,
+    });
+  };
+
+  const isIntegral = form.period === 'integral';
+  const isAfternoon = form.period === 'tarde';
+  const workPeriod = normalizeWorkPeriod(profileForm.work_periods);
+  const inputTheme = { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border };
+  const fieldLabelTheme = { color: colors.textMuted };
+
+  return (
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <StatusBar
+        barStyle={colors.mode === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+        translucent={false}
+      />
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Configura├º├Áes</Text>
+        <TouchableOpacity
+          style={[styles.saveBtn, { backgroundColor: saved ? colors.secondary : colors.primary }]}
+          onPress={handleSave}
+        >
+          <Text style={styles.saveBtnText}>{saved ? 'Salvo' : 'Salvar'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <View style={[styles.profileCard, { backgroundColor: colors.surface }]}>
+          <View style={[styles.profileAvatar, { backgroundColor: colors.primary }]}>
+            <Text style={styles.profileAvatarText}>{initials(profileForm.name)}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.profileName, { color: colors.text }]}>{profileForm.name.trim() || 'Perfil profissional'}</Text>
+            <Text style={[styles.profileSub, { color: colors.textMuted }]}>{profileForm.subjects.trim() || 'Componentes Curriculares n├úo informados'}</Text>
+          </View>
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Dados profissionais</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Nome</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+          value={profileForm.name}
+          onChangeText={value => {
+            setSaved(false);
+            setProfileForm(current => ({ ...current, name: value }));
+          }}
+          placeholder="Ex: Ana Paula"
+          autoCapitalize="words"
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Componentes Curriculares</Text>
+        <TextInput
+          style={[styles.input, styles.textArea, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+          value={profileForm.subjects}
+          onChangeText={value => {
+            setSaved(false);
+            setProfileForm(current => ({ ...current, subjects: value }));
+          }}
+          placeholder="Ex: Ingl├¬s, Reda├º├úo, Projeto de Vida"
+          multiline
+        />
+
+        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Per├¡odo em que trabalha</Text>
+        <View style={styles.periodRow}>
+          {PERIODS.map(period => {
+            const active = workPeriod === period.key;
+            return (
+              <TouchableOpacity
+                key={period.key}
+                style={[
+                  styles.periodBtn,
+                  { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                  active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                ]}
+                onPress={() => handlePeriodChange(period.key)}
+              >
+                <Text style={[styles.periodText, { color: colors.textMuted }, active && styles.periodTextActive]}>
+                  {period.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Tema do aplicativo</Text>
+        <View style={styles.periodRow}>
+          {THEME_OPTIONS.map(option => {
+            const active = profileForm.theme_preference === option.key;
+            return (
+              <TouchableOpacity
+                key={option.key}
+                style={[
+                  styles.periodBtn,
+                  { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                  active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                ]}
+                onPress={() => {
+                  handleThemeChange(option.key);
+                }}
+              >
+                <Text style={[styles.periodText, { color: colors.textMuted }, active && styles.periodTextActive]}>{option.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Hor├írios</Text>
+        <View style={styles.timeRow}>
+          <View style={styles.timeBox}>
+            <Text style={[styles.fieldLabel, fieldLabelTheme]}>In├¡cio</Text>
+            <TimeInput
+              style={[styles.timeInput, inputTheme, { color: colors.primary, borderColor: colors.primary }]}
+              value={form.start_time}
+              onChangeText={value => updateField('start_time', value)}
+              placeholder="07:30"
+            />
+          </View>
+          <View style={styles.timeBox}>
+            <Text style={[styles.fieldLabel, fieldLabelTheme]}>T├®rmino</Text>
+            <TimeInput
+              style={[styles.timeInput, inputTheme, { color: colors.primary, borderColor: colors.primary }]}
+              value={form.end_time}
+              onChangeText={value => updateField('end_time', value)}
+              placeholder="17:00"
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Dura├º├úo das aulas</Text>
+        <View style={styles.durationRow}>
+          {[40, 45, 48, 50, 60].map(duration => (
+            <TouchableOpacity
+              key={duration}
+              style={[
+                styles.durationChip,
+                { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                form.lesson_duration === duration && { backgroundColor: colors.primary, borderColor: colors.primary },
+              ]}
+              onPress={() => updateField('lesson_duration', duration)}
+            >
+              <Text style={[styles.durationText, { color: colors.textMuted }, form.lesson_duration === duration && styles.durationTextActive]}>
+                {duration}min
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {isAfternoon ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Intervalo da tarde</Text>
+            <View style={styles.timeRow}>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Dura├º├úo (min)</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.afternoon_break_duration)}
+                  onChangeText={value => updateNumberField('afternoon_break_duration', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Ap├│s qual aula</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.afternoon_break_after_lesson)}
+                  onChangeText={value => updateNumberField('afternoon_break_after_lesson', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{isIntegral ? 'Intervalo da manh├ú' : 'Intervalo'}</Text>
+            <View style={styles.timeRow}>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Dura├º├úo (min)</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.break_duration)}
+                  onChangeText={value => updateNumberField('break_duration', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Ap├│s qual aula</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.break_after_lesson)}
+                  onChangeText={value => updateNumberField('break_after_lesson', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {isIntegral && (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Almo├ºo</Text>
+            <View style={styles.timeRow}>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>In├¡cio</Text>
+                <TimeInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={form.lunch_start}
+                  onChangeText={value => updateField('lunch_start', value)}
+                  placeholder="12:00"
+                />
+              </View>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Dura├º├úo (min)</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.lunch_duration)}
+                  onChangeText={value => updateNumberField('lunch_duration', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Intervalo da tarde</Text>
+            <View style={styles.timeRow}>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Dura├º├úo (min)</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.afternoon_break_duration)}
+                  onChangeText={value => updateNumberField('afternoon_break_duration', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+              <View style={styles.timeBox}>
+                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Ap├│s qual aula</Text>
+                <TextInput
+                  style={[styles.smallInput, inputTheme]}
+                  value={String(form.afternoon_break_after_lesson)}
+                  onChangeText={value => updateNumberField('afternoon_break_after_lesson', value)}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Pr├®via dos hor├írios ({slots.length} aulas por dia)</Text>
+        <View style={[styles.previewBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {slots.length === 0 ? (
+            <Text style={[styles.previewEmpty, { color: colors.textMuted }]}>Ajuste os hor├írios para gerar a pr├®via.</Text>
+          ) : (
+            slots.map((slot, index) => (
+              <View key={`${slot.start}-${index}`} style={styles.previewRow}>
+                <View style={styles.previewTime}>
+                  <Text style={[styles.previewTimeText, { color: colors.textMuted }]}>{slot.start}</Text>
+                </View>
+                <View style={[
+                  styles.previewBar,
+                  {
+                    backgroundColor: colors.mode === 'dark' ? `${colors.primary}22` : '#E6F0F8',
+                    borderLeftColor: colors.primary,
+                  },
+                  slot.segment === 'tarde' && {
+                    backgroundColor: colors.mode === 'dark' ? `${colors.secondary}22` : '#E0F7F4',
+                    borderLeftColor: colors.secondary,
+                  },
+                ]}>
+                  <Text style={[
+                    styles.previewLabel,
+                    { color: colors.primary },
+                    slot.segment === 'tarde' && { color: colors.secondary },
+                  ]}>
+                    {slot.label}
+                  </Text>
+                  <Text style={[styles.previewSegment, { color: colors.textMuted }]}>{slot.segment === 'manha' ? 'Manh├ú' : 'Tarde'}</Text>
+                </View>
+                <Text style={[styles.previewEnd, { color: colors.textMuted }]}>{slot.end}</Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={{ height: 80 }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#FAFAFA' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: '#EFEFEF',
+  },
+  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A2E' },
+  saveBtn: { backgroundColor: '#0F4C81', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  saveBtnDone: { backgroundColor: '#14B8A6' },
+  saveBtnText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
+  body: { padding: 16 },
+  profileCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#FFF', borderRadius: 14, padding: 16, marginBottom: 24,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  },
+  profileAvatar: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#0F4C81', alignItems: 'center', justifyContent: 'center',
+  },
+  profileAvatarText: { color: '#E0F7F4', fontWeight: '700', fontSize: 18 },
+  profileName: { fontSize: 17, fontWeight: '700', color: '#1A1A2E' },
+  profileSub: { fontSize: 12, color: '#888', marginTop: 2 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#1A1A2E', marginBottom: 10, marginTop: 8 },
+  fieldLabel: { fontSize: 11, fontWeight: '600', color: '#888', marginBottom: 6, textTransform: 'uppercase' },
+  input: {
+    backgroundColor: '#FFF', borderRadius: 10, padding: 12, fontSize: 14,
+    color: '#333', borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 14,
+  },
+  textArea: { minHeight: 70, textAlignVertical: 'top' },
+  periodRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  periodBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+    backgroundColor: '#F0F0F0', borderWidth: 1.5, borderColor: '#E0E0E0',
+  },
+  periodBtnActive: { backgroundColor: '#0F4C81', borderColor: '#0F4C81' },
+  periodText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  periodTextActive: { color: '#FFF' },
+  timeRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  timeBox: { flex: 1 },
+  timeInput: {
+    backgroundColor: '#FFF', borderRadius: 10, padding: 12, fontSize: 20,
+    fontWeight: '700', color: '#0F4C81', borderWidth: 1.5, borderColor: '#0F4C81',
+    textAlign: 'center',
+  },
+  smallInput: {
+    backgroundColor: '#FFF', borderRadius: 10, padding: 12, fontSize: 18,
+    fontWeight: '600', color: '#333', borderWidth: 1, borderColor: '#DDD',
+    textAlign: 'center',
+  },
+  durationRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  durationChip: {
+    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+    backgroundColor: '#F0F0F0', borderWidth: 1.5, borderColor: '#E0E0E0',
+  },
+  durationChipActive: { backgroundColor: '#0F4C81', borderColor: '#0F4C81' },
+  durationText: { fontSize: 12, fontWeight: '600', color: '#666' },
+  durationTextActive: { color: '#FFF' },
+  previewBox: {
+    backgroundColor: '#FFF', borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: '#EFEFEF',
+  },
+  previewEmpty: { fontSize: 12, color: '#888', textAlign: 'center', paddingVertical: 18 },
+  previewRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  previewTime: { width: 42, alignItems: 'flex-end' },
+  previewTimeText: { fontSize: 11, color: '#888', fontWeight: '500' },
+  previewBar: {
+    flex: 1, backgroundColor: '#E6F0F8', borderRadius: 6, paddingVertical: 5,
+    paddingHorizontal: 10, borderLeftWidth: 3, borderLeftColor: '#0F4C81',
+  },
+  previewBarAfternoon: { backgroundColor: '#E0F7F4', borderLeftColor: '#14B8A6' },
+  previewLabel: { fontSize: 11, color: '#0F4C81', fontWeight: '600' },
+  previewLabelAfternoon: { color: '#14B8A6' },
+  previewSegment: { fontSize: 10, color: '#888', marginTop: 1 },
+  previewEnd: { fontSize: 10, color: '#AAA', width: 36 },
+});

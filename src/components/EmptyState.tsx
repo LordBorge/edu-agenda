@@ -1,25 +1,50 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { useAppTheme } from '../theme';
+import { ActionButton } from './ActionButton';
 
-interface Props {
-  icon: string;
+type Props = {
   title: string;
-  subtitle?: string;
-}
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  style?: StyleProp<ViewStyle>;
+};
 
-export function EmptyState({ icon, title, subtitle }: Props) {
+export function EmptyState({ title, description, actionLabel, onAction, style }: Props) {
+  const { colors } = useAppTheme();
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.icon}>{icon}</Text>
-      <Text style={styles.title}>{title}</Text>
-      {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+    <View style={[styles.wrap, style]}>
+      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.description, { color: colors.textMuted }]}>{description}</Text>
+      {actionLabel && onAction ? (
+        <ActionButton label={actionLabel} onPress={onAction} style={styles.action} />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', justifyContent: 'center', padding: 40 },
-  icon: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 6, textAlign: 'center' },
-  subtitle: { fontSize: 13, color: '#888', textAlign: 'center', lineHeight: 20 },
+  wrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 56,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  description: {
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 320,
+    textAlign: 'center',
+  },
+  action: {
+    marginTop: 20,
+  },
 });

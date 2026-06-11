@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   RefreshControl, StatusBar, TextInput,
@@ -17,9 +17,12 @@ import { LessonDetailSheet } from '../../components/LessonDetailSheet';
 import { BottomSheetModal } from '../../components/BottomSheetModal';
 import { LessonActivitySelector } from '../../components/LessonActivitySelector';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { PreparedContentToggle } from '../../components/PreparedContentToggle';
 import { getActivityTypeVisual } from '../../utils/colors';
 import { useAppTheme } from '../../theme';
 import { LESSON_STATUS_OPTIONS, normalizeLessonStatus, parseLessonActivities, stringifyLessonActivities } from '../../utils/lessonActivities';
+import { hasPendingLessonContent, isReservedLesson } from '../../utils/lessonContent';
+import { SheetScrollView } from '../../components/SheetScrollView';
 
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const MONTHS_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -56,13 +59,15 @@ function initials(name: string): string {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
+function plural(value: number, singular: string, pluralValue: string): string {
+  return value === 1 ? singular : pluralValue;
+}
+
 export function DashboardScreen({ navigation }: any) {
   const { colors } = useAppTheme();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [activityCount, setActivityCount] = useState(0);
-  const [reminderCount, setReminderCount] = useState(0);
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null);
   const [lessonActivityOptions, setLessonActivityOptions] = useState<LessonActivityOption[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,6 +80,7 @@ export function DashboardScreen({ navigation }: any) {
     methodology: '',
     status: 'Pendente',
     notes: '',
+    conteudo_preparado: 0,
   });
 
   const load = useCallback(async () => {
@@ -88,8 +94,6 @@ export function DashboardScreen({ navigation }: any) {
     setLessons(l);
     setProfile(p);
     setLessonActivityOptions(activityOptions);
-    setActivityCount(a.length);
-    setReminderCount(r.filter(x => !x.done).length);
     setActivities(a.slice(0, 4));
     setReminders(r.filter(x => !x.done).slice(0, 3));
   }, []);
@@ -115,6 +119,7 @@ export function DashboardScreen({ navigation }: any) {
       methodology: lesson.methodology ?? '',
       status: normalizeLessonStatus(lesson.status),
       notes: lesson.notes ?? '',
+      conteudo_preparado: lesson.conteudo_preparado ?? 0,
     });
   };
 
@@ -127,6 +132,7 @@ export function DashboardScreen({ navigation }: any) {
       methodology: lessonEntryForm.methodology.trim(),
       status: lessonEntryForm.status,
       notes: lessonEntryForm.notes.trim(),
+      conteudo_preparado: lessonEntryForm.conteudo_preparado,
     });
 
     setEditingLesson(null);
@@ -171,6 +177,26 @@ export function DashboardScreen({ navigation }: any) {
   const todayName = realTodayWeekday >= 1 && realTodayWeekday <= 5
     ? WEEKDAY_FULL[realTodayWeekday - 1]
     : 'Fim de semana';
+  const classLessonsToday = useMemo(
+    () => lessons.filter(lesson => !isReservedLesson(lesson)),
+    [lessons]
+  );
+  const dailyStatus = useMemo(() => {
+    return classLessonsToday.reduce(
+      (acc, lesson) => {
+        const status = normalizeLessonStatus(lesson.status);
+        if (status === LESSON_STATUS_OPTIONS[1]) acc.done += 1;
+        else if (status === LESSON_STATUS_OPTIONS[2]) acc.canceled += 1;
+        else acc.pending += 1;
+        return acc;
+      },
+      { pending: 0, done: 0, canceled: 0 }
+    );
+  }, [classLessonsToday]);
+  const pendingContentCount = useMemo(
+    () => classLessonsToday.filter(hasPendingLessonContent).length,
+    [classLessonsToday]
+  );
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
@@ -199,18 +225,32 @@ export function DashboardScreen({ navigation }: any) {
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.statNum, { color: colors.primary }]}>{lessons.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Aulas hoje</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.statNum, { color: activityCount > 0 ? '#DB2777' : colors.secondary }]}>
-              {activityCount}
+            <Text style={[styles.statNum, { color: colors.primary }]}>{classLessonsToday.length}</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+              {plural(classLessonsToday.length, 'aula hoje', 'aulas hoje')}
             </Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Pendentes</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.statNum, { color: colors.secondary }]}>{reminderCount}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Lembretes</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Status de hoje</Text>
+            <View style={styles.statusSummary}>
+              <Text style={[styles.statusSummaryText, { color: colors.text }]}>
+                <Text style={{ color: colors.primary }}>{dailyStatus.pending}</Text> {plural(dailyStatus.pending, 'pendente', 'pendentes')}
+              </Text>
+              <Text style={[styles.statusSummaryText, { color: colors.text }]}>
+                <Text style={{ color: colors.secondary }}>{dailyStatus.done}</Text> {plural(dailyStatus.done, 'concluída', 'concluídas')}
+              </Text>
+              <Text style={[styles.statusSummaryText, { color: colors.text }]}>
+                <Text style={{ color: '#C0392B' }}>{dailyStatus.canceled}</Text> {plural(dailyStatus.canceled, 'cancelada', 'canceladas')}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.statNum, { color: pendingContentCount > 0 ? '#B7791F' : colors.secondary }]}>
+              {pendingContentCount}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+              {plural(pendingContentCount, 'aula não preparada', 'aulas não preparadas')}
+            </Text>
           </View>
         </View>
 
@@ -282,7 +322,7 @@ export function DashboardScreen({ navigation }: any) {
         {reminders.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Lembretes</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Próximos lembretes</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Atividades', { initialTab: 1 })}>
                 <Text style={[styles.seeAll, { color: colors.secondary }]}>Ver todos</Text>
               </TouchableOpacity>
@@ -317,7 +357,7 @@ export function DashboardScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <SheetScrollView>
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Conteúdo</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
@@ -326,6 +366,14 @@ export function DashboardScreen({ navigation }: any) {
             placeholder="Conteúdo trabalhado hoje"
             placeholderTextColor={colors.textMuted}
             multiline
+          />
+
+          <PreparedContentToggle
+            value={lessonEntryForm.conteudo_preparado === 1}
+            onChange={value => setLessonEntryForm(current => ({
+              ...current,
+              conteudo_preparado: value ? 1 : 0,
+            }))}
           />
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Atividade</Text>
@@ -374,7 +422,7 @@ export function DashboardScreen({ navigation }: any) {
           />
 
           <View style={{ height: 40 }} />
-        </ScrollView>
+        </SheetScrollView>
       </BottomSheetModal>
 
       <ConfirmDialog
@@ -410,7 +458,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
   statNum: { fontSize: 28, fontWeight: '700', color: '#0F4C81' },
-  statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
+  statLabel: { fontSize: 11, color: '#888', marginTop: 2, textAlign: 'center' },
+  statusSummary: { gap: 2, marginTop: 6, width: '100%' },
+  statusSummaryText: { fontSize: 10, fontWeight: '700', textAlign: 'center' },
   section: { marginBottom: 20 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A2E', marginBottom: 2 },

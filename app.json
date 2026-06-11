@@ -7,18 +7,27 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash-logo.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#F8FAFC"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.eduagenda.app"
+      "bundleIdentifier": "com.eduagenda.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "O EduAgenda usa a câmera para importar a foto do horário escolar.",
+        "NSPhotoLibraryUsageDescription": "O EduAgenda acessa suas imagens para importar prints ou fotos do horário escolar."
+      }
     },
     "android": {
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0F4C81"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#F8FAFC"
       },
       "package": "com.eduagenda.app"
     },
@@ -27,6 +36,13 @@
         "expo-sqlite",
         {
           "enableFTS": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O EduAgenda acessa suas imagens para importar prints ou fotos do horário escolar.",
+          "cameraPermission": "O EduAgenda usa a câmera para importar a foto do horário escolar."
         }
       ]
     ]
