@@ -264,6 +264,27 @@ export function PerfilScreen({
     updateField(key, Number.isNaN(parsed) ? 0 : parsed);
   };
 
+  const hasMorningBreak = form.break_duration > 0 && form.break_after_lesson > 0;
+  const hasAfternoonBreak = form.afternoon_break_duration > 0 && form.afternoon_break_after_lesson > 0;
+
+  const toggleMorningBreak = (enabled: boolean) => {
+    commitForm({
+      ...form,
+      break_duration: enabled ? (form.break_duration > 0 ? form.break_duration : 20) : 0,
+      break_after_lesson: enabled ? (form.break_after_lesson > 0 ? form.break_after_lesson : 2) : 0,
+    });
+    setFormErrors(current => ({ ...current, slots: undefined }));
+  };
+
+  const toggleAfternoonBreak = (enabled: boolean) => {
+    commitForm({
+      ...form,
+      afternoon_break_duration: enabled ? (form.afternoon_break_duration > 0 ? form.afternoon_break_duration : 20) : 0,
+      afternoon_break_after_lesson: enabled ? (form.afternoon_break_after_lesson > 0 ? form.afternoon_break_after_lesson : 2) : 0,
+    });
+    setFormErrors(current => ({ ...current, slots: undefined }));
+  };
+
   const handleSave = async () => {
     const nextErrors: SettingsFormErrors = {};
 
@@ -291,6 +312,16 @@ export function PerfilScreen({
     } else {
       settingsToSave.afternoon_start_time = form.start_time;
       settingsToSave.afternoon_end_time = form.end_time;
+    }
+
+    if (form.period === 'manha' && !hasMorningBreak) {
+      settingsToSave.break_duration = 0;
+      settingsToSave.break_after_lesson = 0;
+    }
+
+    if (form.period === 'tarde' && !hasAfternoonBreak) {
+      settingsToSave.afternoon_break_duration = 0;
+      settingsToSave.afternoon_break_after_lesson = 0;
     }
 
     const timeFields = [
@@ -559,26 +590,68 @@ export function PerfilScreen({
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               {form.period === 'integral' ? 'Intervalo da manhã' : 'Intervalo'}
             </Text>
-            <View style={styles.timeRow}>
-              <View style={styles.timeBox}>
-                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Duração (min)</Text>
-                <TextInput
-                  style={[styles.smallInput, inputTheme]}
-                  value={String(form.break_duration)}
-                  onChangeText={value => updateNumberField('break_duration', value)}
-                  keyboardType="number-pad"
-                />
+            {form.period === 'manha' && (
+              <View style={styles.intervalChoiceRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.intervalChoice,
+                    { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                    hasMorningBreak && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
+                  onPress={() => toggleMorningBreak(true)}
+                >
+                  <Text style={[
+                    styles.intervalChoiceText,
+                    { color: colors.textMuted },
+                    hasMorningBreak && styles.intervalChoiceTextActive,
+                  ]}>
+                    Com intervalo
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.intervalChoice,
+                    { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                    !hasMorningBreak && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
+                  onPress={() => toggleMorningBreak(false)}
+                >
+                  <Text style={[
+                    styles.intervalChoiceText,
+                    { color: colors.textMuted },
+                    !hasMorningBreak && styles.intervalChoiceTextActive,
+                  ]}>
+                    Sem intervalo
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.timeBox}>
-                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Após qual aula</Text>
-                <TextInput
-                  style={[styles.smallInput, inputTheme]}
-                  value={String(form.break_after_lesson)}
-                  onChangeText={value => updateNumberField('break_after_lesson', value)}
-                  keyboardType="number-pad"
-                />
+            )}
+            {(form.period === 'integral' || hasMorningBreak) ? (
+              <View style={styles.timeRow}>
+                <View style={styles.timeBox}>
+                  <Text style={[styles.fieldLabel, fieldLabelTheme]}>Duração (min)</Text>
+                  <TextInput
+                    style={[styles.smallInput, inputTheme]}
+                    value={String(form.break_duration)}
+                    onChangeText={value => updateNumberField('break_duration', value)}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.timeBox}>
+                  <Text style={[styles.fieldLabel, fieldLabelTheme]}>Após qual aula</Text>
+                  <TextInput
+                    style={[styles.smallInput, inputTheme]}
+                    value={String(form.break_after_lesson)}
+                    onChangeText={value => updateNumberField('break_after_lesson', value)}
+                    keyboardType="number-pad"
+                  />
+                </View>
               </View>
-            </View>
+            ) : (
+              <Text style={[styles.intervalHint, { color: colors.textMuted }]}>
+                Nenhuma pausa será adicionada na geração dos horários deste período.
+              </Text>
+            )}
           </>
         )}
         {form.period === 'integral' && formErrors.lunch ? <Text style={styles.errorText}>{formErrors.lunch}</Text> : null}
@@ -614,26 +687,68 @@ export function PerfilScreen({
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               {form.period === 'integral' ? 'Intervalo da tarde' : 'Intervalo'}
             </Text>
-            <View style={styles.timeRow}>
-              <View style={styles.timeBox}>
-                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Duração (min)</Text>
-                <TextInput
-                  style={[styles.smallInput, inputTheme]}
-                  value={String(form.afternoon_break_duration)}
-                  onChangeText={value => updateNumberField('afternoon_break_duration', value)}
-                  keyboardType="number-pad"
-                />
+            {form.period === 'tarde' && (
+              <View style={styles.intervalChoiceRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.intervalChoice,
+                    { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                    hasAfternoonBreak && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
+                  onPress={() => toggleAfternoonBreak(true)}
+                >
+                  <Text style={[
+                    styles.intervalChoiceText,
+                    { color: colors.textMuted },
+                    hasAfternoonBreak && styles.intervalChoiceTextActive,
+                  ]}>
+                    Com intervalo
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.intervalChoice,
+                    { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                    !hasAfternoonBreak && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
+                  onPress={() => toggleAfternoonBreak(false)}
+                >
+                  <Text style={[
+                    styles.intervalChoiceText,
+                    { color: colors.textMuted },
+                    !hasAfternoonBreak && styles.intervalChoiceTextActive,
+                  ]}>
+                    Sem intervalo
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.timeBox}>
-                <Text style={[styles.fieldLabel, fieldLabelTheme]}>Após qual aula</Text>
-                <TextInput
-                  style={[styles.smallInput, inputTheme]}
-                  value={String(form.afternoon_break_after_lesson)}
-                  onChangeText={value => updateNumberField('afternoon_break_after_lesson', value)}
-                  keyboardType="number-pad"
-                />
+            )}
+            {(form.period === 'integral' || hasAfternoonBreak) ? (
+              <View style={styles.timeRow}>
+                <View style={styles.timeBox}>
+                  <Text style={[styles.fieldLabel, fieldLabelTheme]}>Duração (min)</Text>
+                  <TextInput
+                    style={[styles.smallInput, inputTheme]}
+                    value={String(form.afternoon_break_duration)}
+                    onChangeText={value => updateNumberField('afternoon_break_duration', value)}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.timeBox}>
+                  <Text style={[styles.fieldLabel, fieldLabelTheme]}>Após qual aula</Text>
+                  <TextInput
+                    style={[styles.smallInput, inputTheme]}
+                    value={String(form.afternoon_break_after_lesson)}
+                    onChangeText={value => updateNumberField('afternoon_break_after_lesson', value)}
+                    keyboardType="number-pad"
+                  />
+                </View>
               </View>
-            </View>
+            ) : (
+              <Text style={[styles.intervalHint, { color: colors.textMuted }]}>
+                Nenhuma pausa será adicionada na geração dos horários deste período.
+              </Text>
+            )}
           </>
         )}
 
@@ -753,6 +868,25 @@ const styles = StyleSheet.create({
   durationChipActive: { backgroundColor: '#0F4C81', borderColor: '#0F4C81' },
   durationText: { fontSize: 12, fontWeight: '600', color: '#666' },
   durationTextActive: { color: '#FFF' },
+  intervalChoiceRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  intervalChoice: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+  },
+  intervalChoiceText: { fontSize: 13, fontWeight: '700', color: '#666' },
+  intervalChoiceTextActive: { color: '#FFF' },
+  intervalHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    marginTop: -4,
+    marginBottom: 20,
+  },
   previewBox: {
     backgroundColor: '#FFF', borderRadius: 12, padding: 12,
     borderWidth: 1, borderColor: '#EFEFEF',

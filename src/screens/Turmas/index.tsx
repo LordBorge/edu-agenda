@@ -42,6 +42,20 @@ function splitSubjects(subjects: string): string[] {
     .filter(subject => !/planejamento/i.test(subject));
 }
 
+function joinSubjects(subjects: string[]): string {
+  const seen = new Set<string>();
+  return subjects
+    .map(subject => subject.trim())
+    .filter(Boolean)
+    .filter(subject => {
+      const key = subject.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(', ');
+}
+
 export function TurmasScreen() {
   const { colors } = useAppTheme();
   const [classes, setClasses] = useState<Class[]>([]);
@@ -49,6 +63,7 @@ export function TurmasScreen() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Class | null>(null);
   const [customSubject, setCustomSubject] = useState(false);
+  const [customSubjectInput, setCustomSubjectInput] = useState('');
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(EMPTY_CONFIRM_DIALOG);
   const [formErrors, setFormErrors] = useState<{ name?: string; subject?: string }>({});
   const [form, setForm] = useState({
@@ -70,6 +85,7 @@ export function TurmasScreen() {
     const subjectOptions = splitSubjects(profile?.subjects ?? '');
     setEditing(null);
     setCustomSubject(subjectOptions.length === 0);
+    setCustomSubjectInput('');
     setForm({
       name: '',
       subject: subjectOptions[0] ?? '',
@@ -82,11 +98,14 @@ export function TurmasScreen() {
 
   const openEdit = (c: Class) => {
     const subjectOptions = splitSubjects(profile?.subjects ?? '');
+    const selectedSubjects = splitSubjects(c.subject);
+    const customSubjects = selectedSubjects.filter(subject => !subjectOptions.includes(subject));
     setEditing(c);
-    setCustomSubject(!subjectOptions.includes(c.subject));
+    setCustomSubject(customSubjects.length > 0);
+    setCustomSubjectInput(customSubjects.join(', '));
     setForm({
       name: c.name,
-      subject: c.subject,
+      subject: joinSubjects(selectedSubjects.filter(subject => subjectOptions.includes(subject))),
       color: c.color,
       student_count: String(c.student_count),
     });
@@ -95,9 +114,13 @@ export function TurmasScreen() {
   };
 
   const handleSave = async () => {
+    const finalSubjects = joinSubjects([
+      ...splitSubjects(form.subject),
+      ...(customSubject ? splitSubjects(customSubjectInput) : []),
+    ]);
     const nextErrors = {
       name: form.name.trim() ? undefined : 'Informe o nome da turma',
-      subject: form.subject.trim() ? undefined : 'Informe o componente curricular',
+      subject: finalSubjects ? undefined : 'Informe ao menos um componente curricular',
     };
 
     if (nextErrors.name || nextErrors.subject) {
@@ -108,7 +131,7 @@ export function TurmasScreen() {
     const data = {
       name: form.name.trim(),
       grade: form.name.trim(),
-      subject: form.subject.trim(),
+      subject: finalSubjects,
       color: form.color,
       student_count: parseInt(form.student_count) || 0,
     };
@@ -122,10 +145,20 @@ export function TurmasScreen() {
   };
 
   const subjectOptions = splitSubjects(profile?.subjects ?? '');
+  const selectedSubjects = splitSubjects(form.subject);
+
+  const toggleSubject = (subject: string) => {
+    const selected = selectedSubjects.includes(subject)
+      ? selectedSubjects.filter(item => item !== subject)
+      : [...selectedSubjects, subject];
+    setForm(current => ({ ...current, subject: joinSubjects(selected) }));
+    if (formErrors.subject) setFormErrors(current => ({ ...current, subject: undefined }));
+  };
 
   const closeModal = () => {
     setShowModal(false);
     setEditing(null);
+    setCustomSubjectInput('');
     setFormErrors({});
   };
 
@@ -234,29 +267,29 @@ export function TurmasScreen() {
           {formErrors.name ? <Text style={styles.errorText}>{formErrors.name}</Text> : null}
 
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Componente Curricular *</Text>
+          <Text style={[styles.formHint, { color: colors.textMuted }]}>Selecione um ou mais componentes para esta turma.</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={{ marginBottom: 12 }}
             contentContainerStyle={{ paddingRight: 16 }}
           >
-            {subjectOptions.map(subject => (
-              <TouchableOpacity
-                key={subject}
-                style={[
-                  styles.chip,
-                  { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
-                  !customSubject && form.subject === subject && { backgroundColor: colors.primary, borderColor: colors.primary },
-                ]}
-                onPress={() => {
-                  setCustomSubject(false);
-                  setForm(f => ({ ...f, subject }));
-                  if (formErrors.subject) setFormErrors(current => ({ ...current, subject: undefined }));
-                }}
-              >
-                <Text style={[styles.chipText, { color: colors.text }, !customSubject && form.subject === subject && { color: '#FFF' }]}>{subject}</Text>
-              </TouchableOpacity>
-            ))}
+            {subjectOptions.map(subject => {
+              const active = selectedSubjects.includes(subject);
+              return (
+                <TouchableOpacity
+                  key={subject}
+                  style={[
+                    styles.chip,
+                    { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                    active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
+                  onPress={() => toggleSubject(subject)}
+                >
+                  <Text style={[styles.chipText, { color: colors.text }, active && { color: '#FFF' }]}>{subject}</Text>
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity
               style={[
                 styles.chip,
@@ -264,8 +297,7 @@ export function TurmasScreen() {
                 customSubject && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
               onPress={() => {
-                setCustomSubject(true);
-                setForm(f => ({ ...f, subject: '' }));
+                setCustomSubject(current => !current);
                 setFormErrors(current => ({ ...current, subject: undefined }));
               }}
             >
@@ -275,12 +307,12 @@ export function TurmasScreen() {
           {customSubject && (
             <TextInput
               style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              value={form.subject}
+              value={customSubjectInput}
               onChangeText={v => {
-                setForm(f => ({ ...f, subject: v }));
+                setCustomSubjectInput(v);
                 if (formErrors.subject) setFormErrors(current => ({ ...current, subject: undefined }));
               }}
-              placeholder="Ex: História"
+              placeholder="Ex: Física, Química"
               placeholderTextColor={colors.textMuted}
             />
           )}
@@ -364,6 +396,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A2E' },
   saveBtn: { fontSize: 15, color: '#0F4C81', fontWeight: '700' },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  formHint: { fontSize: 12, marginBottom: 10 },
   errorText: { color: '#C0392B', fontSize: 12, fontWeight: '700', marginTop: -8, marginBottom: 12 },
   optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   optionChip: {

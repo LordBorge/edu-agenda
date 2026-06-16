@@ -29,3 +29,7 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Build outputs
+*.apk
+

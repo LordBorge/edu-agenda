@@ -23,6 +23,8 @@ export interface Lesson {
   kind?: LessonKind;
   title?: string;
   schedule_month?: string;
+  effective_from?: string;
+  effective_until?: string | null;
   weekday: Weekday;
   start_time: string;
   end_time: string;

@@ -142,7 +142,7 @@ export function AgendaScreen({ navigation, route }: any) {
 
   const load = useCallback(async () => {
     const [lessonRows, dayRows, classRows, activityOptions, settings] = await Promise.all([
-      getLessonsForWeek(activeMonthKey),
+      getLessonsForWeek(activeDateISO),
       getLessonsForDate(activeDateISO),
       getClasses(),
       getLessonActivityOptions(),
@@ -441,8 +441,12 @@ export function AgendaScreen({ navigation, route }: any) {
     };
 
     if (editingLesson) {
-      await updateLesson(editingLesson.id, scheduleData);
-      await upsertLessonEntry(editingLesson.id, activeDateISO, entryData);
+      const lessonId = await updateLesson(editingLesson.id, {
+        ...scheduleData,
+        schedule_month: activeMonthKey,
+        effective_from: activeDateISO,
+      });
+      await upsertLessonEntry(lessonId, activeDateISO, entryData);
     } else {
       for (const block of blocks) {
         const lessonId = await createLesson({
@@ -450,7 +454,8 @@ export function AgendaScreen({ navigation, route }: any) {
           start_time: block.start,
           end_time: block.end,
           schedule_month: activeMonthKey,
-        }, activeMonthKey);
+          effective_from: activeDateISO,
+        }, activeDateISO);
         await upsertLessonEntry(lessonId, activeDateISO, entryData);
       }
     }
@@ -882,7 +887,7 @@ export function AgendaScreen({ navigation, route }: any) {
 
       <ScheduleImportSheet
         visible={showImportSheet}
-        monthKey={activeMonthKey}
+        monthKey={activeDateISO}
         onClose={() => setShowImportSheet(false)}
         onImported={async message => {
           await load();

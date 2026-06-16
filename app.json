@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "Edu Agenda",
-    "slug": "edu-agenda",
+    "slug": "eduagenda",
+    "owner": "lordborge",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -45,6 +46,11 @@
           "cameraPermission": "O EduAgenda usa a câmera para importar a foto do horário escolar."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7e03fe96-b645-4ef7-ac2d-bd9ab1b2690c"
+      }
+    }
   }
 }

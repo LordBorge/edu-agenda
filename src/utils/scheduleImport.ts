@@ -73,6 +73,11 @@ const SPECIAL_TERMS = [
 const SUBJECT_ALIASES: Record<string, string> = {
   INGLES: 'Inglês',
   INGLÊS: 'Inglês',
+  LINGUA: 'Língua Inglesa',
+  L_NGUA: 'Língua Inglesa',
+  LINGUA_INGLESA: 'Língua Inglesa',
+  LINGUA_INGLES: 'Língua Inglesa',
+  LINGUA_ING: 'Língua Inglesa',
   PORTUGUES: 'Português',
   PORTUGUÊS: 'Português',
   MATEMATICA: 'Matemática',
@@ -153,6 +158,13 @@ function titleCase(value: string): string {
 function normalizeSubject(value: string): string {
   const trimmed = value.trim();
   const key = normalizeKey(trimmed);
+  const compactKey = key.replace(/_/g, '');
+  if (
+    /L.?NGUA/.test(compactKey)
+    && (/INGL|INGI|INGE/.test(compactKey) || compactKey === 'LINGUA' || compactKey === 'LNGUA')
+  ) {
+    return 'Língua Inglesa';
+  }
   return SUBJECT_ALIASES[key] ?? titleCase(trimmed);
 }
 
@@ -306,8 +318,21 @@ function getWeekdayFromToken(value: string): Weekday | null {
   return found?.weekday ?? null;
 }
 
+function getStrictWeekdayFromLine(value: string): Weekday | null {
+  const normalized = normalizeText(value).toLowerCase();
+  const found = WEEKDAY_ALIASES.find(day => (
+    day.aliases.some(alias => {
+      const normalizedAlias = normalizeText(alias).toLowerCase();
+      return !/^\d/.test(normalizedAlias) && normalized === normalizedAlias;
+    })
+  ));
+  return found?.weekday ?? null;
+}
+
 function countWeekdaysInLine(line: string): number {
-  return WEEKDAY_ALIASES.filter(day => day.aliases.some(alias => textHasAlias(line, alias))).length;
+  return WEEKDAY_ALIASES.filter(day => (
+    day.aliases.some(alias => !/^\d/.test(normalizeText(alias)) && textHasAlias(line, alias))
+  )).length;
 }
 
 function isWeekdayHeaderLine(line: string): boolean {
@@ -356,9 +381,9 @@ function splitCells(line: string): string[] {
     .replace(/\s*\|\s*/g, '|');
 
   return cleaned
+    .replace(/^\|+|\|+$/g, '')
     .split('|')
-    .map(cell => cell.trim())
-    .filter(Boolean);
+    .map(cell => cell.trim());
 }
 
 function normalizeGrade(rawGrade: string): { name: string; grade: string } {
@@ -408,8 +433,17 @@ function parseCell(cell: string): Omit<ScheduleImportItem, 'id' | 'weekday' | 's
   }
 
   const pieces = trimmed.split(/[\/\\|-]+/).map(piece => piece.trim()).filter(Boolean);
-  const gradePiece = pieces[0] ?? '';
-  const subjectPiece = pieces.slice(1).join(' ') || pieces[1] || '';
+  let gradePiece = pieces[0] ?? '';
+  let subjectPiece = pieces.slice(1).join(' ') || pieces[1] || '';
+
+  if (!subjectPiece) {
+    const missingSeparatorMatch = trimmed.match(/^(\d{1,2}\s*[º°ªO?]?\s*[A-Za-z])\s*(.+)$/i);
+    if (missingSeparatorMatch) {
+      gradePiece = missingSeparatorMatch[1];
+      subjectPiece = missingSeparatorMatch[2];
+    }
+  }
+
   const broadClassMatch = gradePiece.match(/\d{1,2}\s*(?:[\u00BA\u00B0\u00AA]|[^\w\s])?\s*[A-Za-z]?/);
   const classMatch = gradePiece.match(/\d{1,2}\s*[º°ªO?]?\s*[A-Za-z]?/);
 
@@ -504,11 +538,14 @@ function parseSingleStartMatrixRows(lines: string[]): ScheduleImportItem[] {
       if (cells.length < section.headerWeekdays.length) return;
 
       section.headerWeekdays.forEach((header, weekdayIndex) => {
-        const candidates = [
-          cells[weekdayIndex],
-          cells[header.index],
-          cells[weekdayIndex + 1],
-        ].filter((value): value is string => !!value);
+        const expectedCells = section.headerWeekdays.length;
+        const candidates = cells.length >= expectedCells
+          ? [cells[weekdayIndex]]
+          : [
+            cells[weekdayIndex],
+            cells[header.index],
+            cells[weekdayIndex + 1],
+          ];
 
         const parsed = candidates
           .map(parseCell)
@@ -540,6 +577,7 @@ function isNewCellToken(value: string): boolean {
   const key = normalizeKey(value);
   return (
     /\d{1,2}\s*[^\s\/\\-]?\s*[A-Za-z]?\s*[\/\\-]/.test(value)
+    || /^\d{1,2}\s*[º°ªO?]?\s*[A-Za-z]?$/i.test(normalizeText(value))
     || SPECIAL_TERMS.some(term => key.includes(normalizeKey(term)))
     || isBlankCellToken(value)
   );
@@ -584,6 +622,7 @@ function parseWhitespaceMatrixRows(lines: string[]): ScheduleImportItem[] {
 
       const end = inferEndTime(row.start, rows[rowIndex + 1]?.start);
       const rowWithoutTime = stripLeadingStartTime(row.line);
+      if (rowWithoutTime.includes('|')) return;
       const cells = splitWhitespaceTableCells(rowWithoutTime, headerWeekdays.length);
 
       headerWeekdays.forEach((weekday, weekdayIndex) => {
@@ -684,7 +723,17 @@ function groupBlocksByY(blocks: NormalizedOcrBlock[], tolerance: number): Normal
 function getWeekdayFromHeaderToken(value: string): Weekday | null {
   const key = normalizeKey(value);
   if (key === 'LER') return 1; // OCR sometimes reads "Ter" as "ler".
-  return getWeekdayFromToken(value);
+
+  const found = WEEKDAY_ALIASES.find(day => (
+    day.aliases.some(alias => !/^\d/.test(normalizeText(alias)) && textHasAlias(value, alias))
+  ));
+  return found?.weekday ?? null;
+}
+
+function getWeekdaysFromHeaderText(value: string): Weekday[] {
+  return WEEKDAY_ALIASES
+    .filter(day => day.aliases.some(alias => !/^\d/.test(normalizeText(alias)) && textHasAlias(value, alias)))
+    .map(day => day.weekday);
 }
 
 function buildHeaderRowFromColumns(columns: Array<{ weekday: Weekday; centerX: number }>, y: number, bottom: number): OcrHeaderRow | null {
@@ -746,9 +795,7 @@ function detectHeaderRows(blocks: NormalizedOcrBlock[]): OcrHeaderRow[] {
   blocks
     .filter(block => block.source === 'line' && countWeekdaysInLine(block.text) >= 2)
     .forEach(block => {
-      const weekdays = WEEKDAY_ALIASES
-        .filter(day => day.aliases.some(alias => textHasAlias(block.text, alias)))
-        .map(day => day.weekday);
+      const weekdays = getWeekdaysFromHeaderText(block.text);
       const uniqueWeekdays = weekdays.filter((weekday, index) => weekdays.indexOf(weekday) === index);
       if (uniqueWeekdays.length < 2) return;
 
@@ -975,6 +1022,53 @@ function parseSingleDetectedDayRows(lines: string[]): ScheduleImportItem[] {
     .filter((item): item is ScheduleImportItem => item !== null);
 }
 
+function isTimeOnlyLine(line: string): boolean {
+  const start = parseSingleStartTime(line);
+  if (!start) return false;
+  return normalizeText(line).replace(/\s+/g, '') === start;
+}
+
+function parseColumnarDaySections(lines: string[]): ScheduleImportItem[] {
+  const firstDayIndex = lines.findIndex(line => getStrictWeekdayFromLine(line) !== null);
+  if (firstDayIndex < 0) return [];
+
+  const times = lines
+    .slice(0, firstDayIndex)
+    .map(line => parseSingleStartTime(line))
+    .filter((time): time is string => time !== null);
+
+  if (times.length < 2) return [];
+
+  const items: ScheduleImportItem[] = [];
+  const dayIndexes = lines
+    .map((line, index) => ({ index, weekday: getStrictWeekdayFromLine(line) }))
+    .filter((entry): entry is { index: number; weekday: Weekday } => entry.weekday !== null);
+
+  dayIndexes.forEach((dayEntry, dayIndex) => {
+    const nextDayIndex = dayIndexes[dayIndex + 1]?.index ?? lines.length;
+    const entries = lines
+      .slice(dayEntry.index + 1, nextDayIndex)
+      .filter(line => !isTimeOnlyLine(line))
+      .map(line => ({ line, parsed: parseCell(line) }))
+      .filter((entry): entry is { line: string; parsed: Omit<ScheduleImportItem, 'id' | 'weekday' | 'start_time' | 'end_time'> } => entry.parsed !== null);
+
+    entries.forEach((entry, entryIndex) => {
+      const start = times[entryIndex];
+      if (!start) return;
+
+      items.push({
+        ...entry.parsed,
+        id: `column-${dayEntry.index}-${entryIndex}-${dayEntry.weekday}-${start}`,
+        weekday: dayEntry.weekday,
+        start_time: start,
+        end_time: inferEndTime(start, times[entryIndex + 1]),
+      });
+    });
+  });
+
+  return items;
+}
+
 export function parseScheduleOcrText(text: string): ScheduleImportPreview {
   const lines = text
     .split(/\r?\n/)
@@ -987,6 +1081,7 @@ export function parseScheduleOcrText(text: string): ScheduleImportPreview {
     ...parseWhitespaceMatrixRows(lines),
     ...parseLineItems(lines),
     ...parseSingleDetectedDayRows(lines),
+    ...parseColumnarDaySections(lines),
   ]);
 
   const uniqueItems = new Map<string, ScheduleImportItem>();
@@ -1012,9 +1107,38 @@ export function parseScheduleOcrText(text: string): ScheduleImportPreview {
 function dedupeScheduleItems(items: ScheduleImportItem[]): ScheduleImportItem[] {
   const uniqueItems = new Map<string, ScheduleImportItem>();
   items.forEach(item => {
-    uniqueItems.set(`${item.kind}-${item.weekday}-${item.start_time}-${item.end_time}-${item.className}-${item.subject}-${item.title}`, item);
+    const key = item.kind === 'class'
+      ? `${item.kind}-${item.weekday}-${item.start_time}-${item.end_time}-${item.className}`
+      : `${item.kind}-${item.weekday}-${item.start_time}-${item.end_time}-${item.title}`;
+    const current = uniqueItems.get(key);
+    if (!current || getImportItemQualityScore(item) > getImportItemQualityScore(current)) {
+      uniqueItems.set(key, item);
+    }
   });
   return Array.from(uniqueItems.values());
+}
+
+function getImportItemQualityScore(item: ScheduleImportItem): number {
+  if (item.kind === 'reserved') return item.title.length;
+
+  const subjectKey = normalizeKey(item.subject);
+  let score = item.className.length + item.subject.length;
+  if (subjectKey === 'LINGUA_INGLESA') score += 50;
+  if (subjectKey === 'QUIMICA') score += 25;
+  if (item.sourceText.includes('/') || item.sourceText.includes('\\')) score += 5;
+  return score;
+}
+
+function getSameScheduleContentKey(item: ScheduleImportItem): string {
+  return item.kind === 'class'
+    ? `${item.kind}-${item.weekday}-${item.className}-${item.subject}`
+    : `${item.kind}-${item.weekday}-${item.title}`;
+}
+
+function mergeTableAndTextItems(tableItems: ScheduleImportItem[], textItems: ScheduleImportItem[]): ScheduleImportItem[] {
+  const tableContentKeys = new Set(tableItems.map(getSameScheduleContentKey));
+  const missingFromTable = textItems.filter(item => !tableContentKeys.has(getSameScheduleContentKey(item)));
+  return [...tableItems, ...missingFromTable];
 }
 
 export function parseScheduleTableFromOcr(input: ScheduleOcrParseInput | string): ScheduleImportPreview {
@@ -1027,7 +1151,7 @@ export function parseScheduleTableFromOcr(input: ScheduleOcrParseInput | string)
   const textPreview = parseScheduleOcrText(text);
   const tableItems = mergeConsecutiveItems(parseCoordinateTableBlocks(blocks));
   const tableHasStructure = tableItems.length > 0;
-  const items = dedupeScheduleItems(tableHasStructure ? tableItems : textPreview.items);
+  const items = dedupeScheduleItems(tableHasStructure ? mergeTableAndTextItems(tableItems, textPreview.items) : textPreview.items);
   const warnings: string[] = [];
   warnings.push(...collectTimeNormalizationWarnings(lines));
 

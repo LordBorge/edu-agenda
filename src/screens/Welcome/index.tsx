@@ -1,3 +1,11 @@
+/**
+ * Arquivo: src/screens/Welcome/index.tsx
+ * Descrição: Tela de Boas-vindas e Configuração Inicial do Usuário (EduAgenda).
+ * Este componente gerencia o primeiro contato do usuário com o aplicativo, solicitando
+ * dados fundamentais como Nome do Professor, Componentes Curriculares (disciplinas que leciona)
+ * e o Período de Trabalho (Integral, Manhã ou Tarde). Esses dados são validados e salvos no banco SQLite.
+ */
+
 import React, { useState } from 'react';
 import {
   Image,
@@ -15,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { markInitialRegistrationComplete, updateProfessionalProfile } from '../../database/queries';
 import { SchedulePeriod } from '../../types';
 
+// Opções de períodos de trabalho disponíveis no formulário de configuração inicial.
 const PERIODS: Array<{ key: SchedulePeriod; label: string }> = [
   { key: 'integral', label: 'Integral' },
   { key: 'manha', label: 'Manhã' },
@@ -22,22 +31,33 @@ const PERIODS: Array<{ key: SchedulePeriod; label: string }> = [
 ];
 
 export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
+  // Estado para armazenar o nome digitado pelo professor.
   const [name, setName] = useState('');
+  
+  // Estado para armazenar as disciplinas (componentes curriculares) digitadas pelo professor.
   const [subjects, setSubjects] = useState('');
+  
+  // Estado para armazenar o período selecionado de trabalho (por padrão, "integral").
   const [period, setPeriod] = useState<SchedulePeriod>('integral');
+  
+  // Estado para gerenciar mensagens de erro de validação dos campos obrigatórios do formulário.
   const [formErrors, setFormErrors] = useState<{ name?: string; subjects?: string }>({});
 
+  // Função disparada ao clicar no botão "Começar" para submeter e validar o formulário.
   const handleStart = async () => {
+    // Validação local: verifica se os campos obrigatórios estão devidamente preenchidos.
     const nextErrors = {
       name: name.trim() ? undefined : 'Informe seu nome para configurar o app',
       subjects: subjects.trim() ? undefined : 'Informe pelo menos um componente curricular',
     };
 
+    // Se houver algum erro de preenchimento, atualiza o estado de erros e interrompe o fluxo.
     if (nextErrors.name || nextErrors.subjects) {
       setFormErrors(nextErrors);
       return;
     }
 
+    // Salva as configurações profissionais no banco de dados e marca o registro inicial como concluído.
     await Promise.all([
       updateProfessionalProfile({
         name: name.trim(),
@@ -49,12 +69,16 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
       markInitialRegistrationComplete(),
     ]);
 
+    // Executa a callback de conclusão recebida via propriedade (props) para avançar à tela principal do app.
     onComplete();
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+      {/* Barra de Status configurada com o tema claro de fundo */}
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" translucent={false} />
+      
+      {/* Componente para evitar que o teclado oculte os campos de input em dispositivos iOS/Android */}
       <KeyboardAvoidingView
         style={styles.keyboard}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -65,41 +89,50 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* Logo/Marca do EduAgenda */}
           <View style={styles.brandMark}>
             <Image source={require('../../../assets/icon.png')} style={styles.brandImage} resizeMode="contain" />
           </View>
 
+          {/* Títulos Principais da tela de Boas-vindas */}
           <Text style={styles.title}>Bem-vindo ao EduAgenda</Text>
           <Text style={styles.subtitle}>Configure seus dados para deixar a agenda com a sua rotina.</Text>
 
+          {/* Input para o Nome do Professor */}
           <Text style={styles.fieldLabel}>Nome</Text>
           <TextInput
             style={styles.input}
             value={name}
             onChangeText={value => {
               setName(value);
+              // Limpa o erro ao começar a digitar
               if (formErrors.name) setFormErrors(current => ({ ...current, name: undefined }));
             }}
             placeholder="Ex.: Ana Paula"
             autoCapitalize="words"
             returnKeyType="next"
           />
+          {/* Exibição condicional de erro de validação para o Nome */}
           {formErrors.name ? <Text style={styles.errorText}>{formErrors.name}</Text> : null}
 
+          {/* Input para os Componentes Curriculares (Disciplinas) */}
           <Text style={styles.fieldLabel}>Componentes curriculares</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={subjects}
             onChangeText={value => {
               setSubjects(value);
+              // Limpa o erro ao começar a digitar
               if (formErrors.subjects) setFormErrors(current => ({ ...current, subjects: undefined }));
             }}
             placeholder="Ex.: Inglês, Projeto de Vida, Redação"
             multiline
             textAlignVertical="top"
           />
+          {/* Exibição condicional de erro de validação para Disciplinas */}
           {formErrors.subjects ? <Text style={styles.errorText}>{formErrors.subjects}</Text> : null}
 
+          {/* Seleção de Período de Trabalho (Chips clicáveis) */}
           <Text style={styles.fieldLabel}>Período de trabalho</Text>
           <View style={styles.periodRow}>
             {PERIODS.map(item => {
@@ -116,6 +149,7 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
             })}
           </View>
 
+          {/* Botão para finalizar a configuração inicial */}
           <TouchableOpacity style={styles.primaryBtn} onPress={handleStart}>
             <Text style={styles.primaryText}>Começar</Text>
           </TouchableOpacity>

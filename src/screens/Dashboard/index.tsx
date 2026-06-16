@@ -1,3 +1,12 @@
+/**
+ * Arquivo: src/screens/Dashboard/index.tsx
+ * Descrição: Tela Inicial / Dashboard (Início) do EduAgenda.
+ * Esta tela renderiza as estatísticas rápidas do dia atual do professor (total de aulas,
+ * status de conclusão das aulas e quantidade de aulas com material não preparado),
+ * a listagem das aulas de hoje (usando o LessonCard), as tarefas pendentes de maior prioridade,
+ * os próximos lembretes do calendário e fornece o modal de edição de diário de classe.
+ */
+
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
@@ -24,8 +33,11 @@ import { LESSON_STATUS_OPTIONS, normalizeLessonStatus, parseLessonActivities, st
 import { hasPendingLessonContent, isReservedLesson } from '../../utils/lessonContent';
 import { SheetScrollView } from '../../components/SheetScrollView';
 
+// Vetores de nomes para dias da semana e meses em português para exibição formatada da data do cabeçalho.
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const MONTHS_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+// Estrutura de tipo para controle do estado do modal genérico de confirmação.
 type ConfirmDialogState = {
   visible: boolean;
   title: string;
@@ -33,6 +45,7 @@ type ConfirmDialogState = {
   onConfirm: () => void | Promise<void>;
 };
 
+// Estado padrão zerado para o modal de confirmação.
 const EMPTY_CONFIRM_DIALOG: ConfirmDialogState = {
   visible: false,
   title: '',
@@ -40,6 +53,7 @@ const EMPTY_CONFIRM_DIALOG: ConfirmDialogState = {
   onConfirm: () => undefined,
 };
 
+// Retorna uma saudação apropriada ("Bom dia", "Boa tarde" ou "Boa noite") com base no horário local do aparelho.
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return 'Bom dia';
@@ -47,11 +61,13 @@ function getGreeting(): string {
   return 'Boa noite';
 }
 
+// Retorna uma string formatada representando a data de hoje, ex: "Segunda, 10 de jun".
 function todayLabel(): string {
   const d = new Date();
   return `${DAYS_PT[d.getDay()]}, ${d.getDate()} de ${MONTHS_PT[d.getMonth()]}`;
 }
 
+// Extrai as iniciais do nome do usuário para renderizar no avatar circular da barra superior.
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'ED';
@@ -59,21 +75,31 @@ function initials(name: string): string {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
+// Utilitário de pluralização simples em português do Brasil.
 function plural(value: number, singular: string, pluralValue: string): string {
   return value === 1 ? singular : pluralValue;
 }
 
 export function DashboardScreen({ navigation }: any) {
+  // Carrega as cores do tema ativo do EduAgenda.
   const { colors } = useAppTheme();
+
+  // Estados locais para listas de dados carregadas do SQLite.
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null);
   const [lessonActivityOptions, setLessonActivityOptions] = useState<LessonActivityOption[]>([]);
+  
+  // Controle de recarregamento por gesto puxar-para-baixo (Pull to Refresh).
   const [refreshing, setRefreshing] = useState(false);
+
+  // Estados para controle de modais e folhas inferiores abertas.
   const [detailLesson, setDetailLesson] = useState<Lesson | null>(null);
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(EMPTY_CONFIRM_DIALOG);
+
+  // Formulário do diário da aula a ser editada no modal.
   const [lessonEntryForm, setLessonEntryForm] = useState({
     content: '',
     activity: '',
@@ -83,6 +109,7 @@ export function DashboardScreen({ navigation }: any) {
     conteudo_preparado: 0,
   });
 
+  // Função assíncrona responsável por carregar todas as informações do dia atual no SQLite.
   const load = useCallback(async () => {
     const [l, a, r, p, activityOptions] = await Promise.all([
       getLessonsForDate(dateToISO(new Date())),
@@ -94,22 +121,27 @@ export function DashboardScreen({ navigation }: any) {
     setLessons(l);
     setProfile(p);
     setLessonActivityOptions(activityOptions);
-    setActivities(a.slice(0, 4));
-    setReminders(r.filter(x => !x.done).slice(0, 3));
+    setActivities(a.slice(0, 4)); // Limita a visualização rápida de atividades em no máximo 4
+    setReminders(r.filter(x => !x.done).slice(0, 3)); // Limita a visualização rápida de lembretes ativos em no máximo 3
   }, []);
 
+  // Garante que os dados do Dashboard serão recarregados toda vez que a tela ganhar o foco de navegação.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // Disparado ao puxar a ScrollView para atualizar os dados manualmente.
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  // Fecha o modal de confirmação restaurando seu estado vazio.
   const closeConfirmDialog = () => setConfirmDialog(EMPTY_CONFIRM_DIALOG);
 
+  // Confirma a ação pendente do modal de confirmação e fecha o modal.
   const confirmAndClose = async () => {
     const action = confirmDialog.onConfirm;
     closeConfirmDialog();
     await action();
   };
 
+  // Abre a folha de edição preenchendo o formulário com os dados da aula selecionada.
   const openEditLessonEntry = (lesson: Lesson) => {
     setDetailLesson(null);
     setEditingLesson(lesson);
@@ -123,6 +155,7 @@ export function DashboardScreen({ navigation }: any) {
     });
   };
 
+  // Salva no SQLite as edições realizadas no formulário da aula editada.
   const saveLessonEntry = async () => {
     if (!editingLesson) return;
 
@@ -139,6 +172,7 @@ export function DashboardScreen({ navigation }: any) {
     await load();
   };
 
+  // Cria uma nova opção de atividade personalizada para associar às aulas.
   const createCustomLessonActivity = async (label: string): Promise<string | null> => {
     const option = await createLessonActivityOption(label);
     const options = await getLessonActivityOptions();
@@ -146,6 +180,7 @@ export function DashboardScreen({ navigation }: any) {
     return option.label;
   };
 
+  // Trata a exclusão de uma atividade personalizada, alertando o usuário caso ela esteja em uso.
   const handleDeleteCustomLessonActivity = async (option: LessonActivityOption) => {
     if (!option.is_custom) return;
 
@@ -173,14 +208,19 @@ export function DashboardScreen({ navigation }: any) {
     });
   };
 
+  // Cálculos dinâmicos memorizados (useMemo) baseados na lista de aulas do dia.
   const realTodayWeekday = new Date().getDay();
   const todayName = realTodayWeekday >= 1 && realTodayWeekday <= 5
     ? WEEKDAY_FULL[realTodayWeekday - 1]
     : 'Fim de semana';
+
+  // Filtra as aulas de hoje removendo horários reservados apenas.
   const classLessonsToday = useMemo(
     () => lessons.filter(lesson => !isReservedLesson(lesson)),
     [lessons]
   );
+
+  // Calcula o somatório de aulas pendentes, concluídas e canceladas para o mini-resumo de hoje.
   const dailyStatus = useMemo(() => {
     return classLessonsToday.reduce(
       (acc, lesson) => {
@@ -193,6 +233,8 @@ export function DashboardScreen({ navigation }: any) {
       { pending: 0, done: 0, canceled: 0 }
     );
   }, [classLessonsToday]);
+
+  // Conta a quantidade de aulas cujos materiais ainda não foram preparados.
   const pendingContentCount = useMemo(
     () => classLessonsToday.filter(hasPendingLessonContent).length,
     [classLessonsToday]
@@ -200,13 +242,14 @@ export function DashboardScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      {/* Configura o comportamento visual da barra de status conforme o tema (claro/escuro) */}
       <StatusBar
         barStyle={colors.mode === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
         translucent={false}
       />
 
-      {/* Header */}
+      {/* Barra de cabeçalho: exibe a data formatada, saudação e avatar do professor */}
       <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <View>
           <Text style={[styles.dateLabel, { color: colors.textMuted }]}>{todayLabel()}</Text>
@@ -222,14 +265,17 @@ export function DashboardScreen({ navigation }: any) {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-        {/* Stats */}
+        {/* Seção superior de Estatísticas Rápidas (3 cards lado a lado) */}
         <View style={styles.statsRow}>
+          {/* Card 1: Quantidade de aulas de hoje (com pluralização dinâmica) */}
           <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.statNum, { color: colors.primary }]}>{classLessonsToday.length}</Text>
             <Text style={[styles.statLabel, { color: colors.textMuted }]}>
               {plural(classLessonsToday.length, 'aula hoje', 'aulas hoje')}
             </Text>
           </View>
+          
+          {/* Card 2: Mini-resumo de status (quantidade de pendentes, concluídas e canceladas) */}
           <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.statLabel, { color: colors.textMuted }]}>Status de hoje</Text>
             <View style={styles.statusSummary}>
@@ -244,6 +290,8 @@ export function DashboardScreen({ navigation }: any) {
               </Text>
             </View>
           </View>
+          
+          {/* Card 3: Quantidade de aulas não preparadas (com pluralização dinâmica e centralizado) */}
           <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.statNum, { color: pendingContentCount > 0 ? '#B7791F' : colors.secondary }]}>
               {pendingContentCount}
@@ -254,7 +302,7 @@ export function DashboardScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* Today's Lessons */}
+        {/* Seção contendo a Listagem de Aulas de Hoje */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Aulas de hoje · {todayName}</Text>
@@ -277,7 +325,7 @@ export function DashboardScreen({ navigation }: any) {
           )}
         </View>
 
-        {/* Pending Activities */}
+        {/* Seção contendo as Atividades Pendentes (limite visual de 4) */}
         {activities.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -318,7 +366,7 @@ export function DashboardScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Reminders */}
+        {/* Seção contendo os Próximos Lembretes do Calendário (limite de 3) */}
         {reminders.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -343,12 +391,14 @@ export function DashboardScreen({ navigation }: any) {
         <View style={{ height: 24 }} />
       </ScrollView>
 
+      {/* Componente Folha de Detalhes da Aula */}
       <LessonDetailSheet
         lesson={detailLesson}
         onClose={() => setDetailLesson(null)}
         onEdit={openEditLessonEntry}
       />
 
+      {/* Modal inferior para Edição do Diário de Classe de uma aula */}
       <BottomSheetModal visible={!!editingLesson} onClose={() => setEditingLesson(null)} maxHeight="82%">
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.text }]}>Editar aula de hoje</Text>
@@ -358,6 +408,7 @@ export function DashboardScreen({ navigation }: any) {
         </View>
 
         <SheetScrollView>
+          {/* Edição de Conteúdo */}
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Conteúdo</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
@@ -368,6 +419,7 @@ export function DashboardScreen({ navigation }: any) {
             multiline
           />
 
+          {/* Toggle de Material Preparado (Sim / Não) */}
           <PreparedContentToggle
             value={lessonEntryForm.conteudo_preparado === 1}
             onChange={value => setLessonEntryForm(current => ({
@@ -376,6 +428,7 @@ export function DashboardScreen({ navigation }: any) {
             }))}
           />
 
+          {/* Selecionador de Atividades Associadas */}
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Atividade</Text>
           <LessonActivitySelector
             options={lessonActivityOptions}
@@ -385,6 +438,7 @@ export function DashboardScreen({ navigation }: any) {
             onDeleteCustom={handleDeleteCustomLessonActivity}
           />
 
+          {/* Seleção do Status da Aula (Pendente, Concluída, Cancelada) */}
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Status</Text>
           <View style={styles.statusRow}>
             {LESSON_STATUS_OPTIONS.map(status => {
@@ -411,6 +465,7 @@ export function DashboardScreen({ navigation }: any) {
             })}
           </View>
 
+          {/* Campo para Observações do Professor */}
           <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Observações</Text>
           <TextInput
             style={[styles.input, styles.textArea, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
@@ -425,6 +480,7 @@ export function DashboardScreen({ navigation }: any) {
         </SheetScrollView>
       </BottomSheetModal>
 
+      {/* Caixa de diálogo para confirmações gerais do sistema (ex: excluir atividade) */}
       <ConfirmDialog
         visible={confirmDialog.visible}
         title={confirmDialog.title}

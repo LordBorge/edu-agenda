@@ -1,3 +1,11 @@
+/**
+ * Arquivo: src/components/LessonDetailSheet.tsx
+ * Descrição: Folha de Detalhes da Aula (LessonDetailSheet).
+ * Renderiza um modal BottomSheetModal com informações minuciosas da aula selecionada,
+ * incluindo horários, título, chip de status da preparação de material (preparada/não preparada),
+ * conteúdo detalhado, atividades, status, observações e botões de ação rápidos (Editar/Excluir).
+ */
+
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Lesson } from '../types';
@@ -6,20 +14,35 @@ import { formatLessonActivities } from '../utils/lessonActivities';
 import { hasPendingLessonContent, isLessonContentPrepared } from '../utils/lessonContent';
 import { BottomSheetModal } from './BottomSheetModal';
 
+// Propriedades (Props) aceitas pelo LessonDetailSheet.
 type Props = {
+  // A aula selecionada para exibir detalhes (se null, o modal permanece oculto).
   lesson: Lesson | null;
+  // Ação executada ao fechar o modal.
   onClose: () => void;
+  // Ação opcional de callback para editar os dados da aula.
   onEdit?: (lesson: Lesson) => void;
+  // Ação opcional de callback para excluir a aula.
   onDelete?: (lesson: Lesson) => void;
 };
 
 export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) {
+  // Obtém as cores do tema corrente.
   const { colors } = useAppTheme();
 
+  // Retorna null (não renderiza nada) caso não haja nenhuma aula selecionada.
   if (!lesson) return null;
+
+  // Formata o texto descritivo das atividades associadas.
   const activities = formatLessonActivities(lesson.activity);
+
+  // Verifica se a aula é de tipo reservado (evento institucional).
   const isReserved = lesson.kind === 'reserved';
+
+  // Verifica se há pendência de conteúdo (mantido para compatibilidade).
   const hasPendingContent = hasPendingLessonContent(lesson);
+
+  // Define o título principal do modal conforme o tipo de aula.
   const title = isReserved
     ? lesson.title || 'Horário reservado'
     : `${lesson.class_name ?? 'Turma'} · ${lesson.subject ?? 'Componente Curricular'}`;
@@ -31,6 +54,7 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
       maxHeight="84%"
     >
       <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Cabeçalho do modal com horários e título principal */}
         <View style={styles.detailHeader}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.detailTime, { color: colors.primary }]}>
@@ -40,9 +64,11 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
               {title}
             </Text>
           </View>
+          {/* Círculo indicador com a cor personalizada da turma */}
           <View style={[styles.colorDot, { backgroundColor: lesson.class_color || colors.primary }]} />
         </View>
 
+        {/* Banner de status: exibe se a aula está com o material preparado ou não */}
         {!isReserved && (
           <View
             style={[
@@ -69,6 +95,7 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
           </View>
         )}
 
+        {/* Bloco contendo a descrição do Conteúdo programado ou Tipo de Evento */}
         <View style={[styles.detailBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.detailLabel, { color: colors.textMuted }]}>
             {isReserved ? 'Tipo' : 'Conteúdo'}
@@ -78,12 +105,15 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
           </Text>
         </View>
 
+        {/* Grade de informações adicionais (Atividades e Status) apenas para aulas comuns */}
         {!isReserved && (
           <View style={styles.detailGrid}>
+            {/* Bloco de Atividades */}
             <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Atividade</Text>
               <Text style={[styles.detailText, { color: colors.text }]}>{activities || 'Sem atividade'}</Text>
             </View>
+            {/* Bloco de Status */}
             <View style={[styles.detailItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Status</Text>
               <Text style={[styles.detailText, { color: colors.text }]}>{lesson.status || 'Sem status'}</Text>
@@ -91,6 +121,7 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
           </View>
         )}
 
+        {/* Bloco contendo as Observações gerais da aula */}
         {!isReserved && (
           <View style={[styles.detailBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Observações</Text>
@@ -98,6 +129,7 @@ export function LessonDetailSheet({ lesson, onClose, onEdit, onDelete }: Props) 
           </View>
         )}
 
+        {/* Fileira de botões para ações rápidas de Editar e Excluir */}
         {(onEdit || onDelete) && (
           <View style={styles.actionRow}>
             {onEdit && !isReserved && (

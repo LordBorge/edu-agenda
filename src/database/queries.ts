@@ -28,6 +28,53 @@ function todayMonthKey(): string {
   return monthKeyFromDate(new Date());
 }
 
+function todayISO(): string {
+  const today = new Date();
+  return [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, '0'),
+    String(today.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function normalizeEffectiveDate(value?: string): string {
+  if (!value) return todayISO();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (/^\d{4}-\d{2}$/.test(value)) return `${value}-01`;
+  return todayISO();
+}
+
+function monthKeyFromEffectiveDate(value: string): string {
+  return normalizeEffectiveDate(value).slice(0, 7);
+}
+
+function addDaysISO(date: string, days: number): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() + days);
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, '0'),
+    String(parsed.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function weekDatesFromISO(date: string): string[] {
+  const parsed = new Date(`${normalizeEffectiveDate(date)}T00:00:00`);
+  const day = parsed.getDay();
+  const monday = new Date(parsed);
+  monday.setDate(parsed.getDate() - (day === 0 ? 6 : day - 1));
+
+  return Array.from({ length: 5 }, (_, index) => {
+    const item = new Date(monday);
+    item.setDate(monday.getDate() + index);
+    return [
+      item.getFullYear(),
+      String(item.getMonth() + 1).padStart(2, '0'),
+      String(item.getDate()).padStart(2, '0'),
+    ].join('-');
+  });
+}
+
 function weekdayFromISO(date: string): number | null {
   const parsed = new Date(`${date}T00:00:00`);
   const day = parsed.getDay();
@@ -110,34 +157,69 @@ export async function deleteClass(id: number): Promise<void> {
 }
 
 // ─── LESSONS ────────────────────────────────────────────────────────────────
-export async function getLessonsForWeek(monthKey = todayMonthKey()): Promise<Lesson[]> {
-  await ensureScheduleForMonth(monthKey);
-  return await getDB().getAllAsync<Lesson>(`
-    SELECT l.*, c.name as class_name, c.color as class_color, c.subject
-    FROM lessons l
-    LEFT JOIN classes c ON l.class_id = c.id
-    WHERE l.schedule_month = ?
-    ORDER BY l.weekday ASC, l.start_time ASC
-  `, [monthKey]);
+async function closeConflictingLessonsFromDate(data: {
+  idToKeepOpen?: number;
+  weekday: number;
+  start_time: string;
+  effectiveFrom: string;
+}): Promise<void> {
+  const endDate = addDaysISO(data.effectiveFrom, -1);
+  await getDB().runAsync(
+    `UPDATE lessons
+     SET effective_until = ?
+     WHERE weekday = ?
+       AND start_time = ?
+       AND COALESCE(effective_from, schedule_month || '-01', '0000-01-01') < ?
+       AND (effective_until IS NULL OR effective_until = '' OR effective_until >= ?)
+       AND (? IS NULL OR id <> ?)`,
+    [
+      endDate,
+      data.weekday,
+      data.start_time,
+      data.effectiveFrom,
+      data.effectiveFrom,
+      data.idToKeepOpen ?? null,
+      data.idToKeepOpen ?? null,
+    ]
+  );
 }
 
-export async function getLessonsForDay(weekday: number, monthKey = todayMonthKey()): Promise<Lesson[]> {
-  await ensureScheduleForMonth(monthKey);
+export async function getLessonsForWeek(referenceDate = todayISO()): Promise<Lesson[]> {
+  const dates = weekDatesFromISO(referenceDate);
+  const lessons: Lesson[] = [];
+
+  for (const [weekday, date] of dates.entries()) {
+    const rows = await getDB().getAllAsync<Lesson>(`
+      SELECT l.*, c.name as class_name, c.color as class_color, c.subject
+      FROM lessons l
+      LEFT JOIN classes c ON l.class_id = c.id
+      WHERE l.weekday = ?
+        AND COALESCE(l.effective_from, l.schedule_month || '-01', '0000-01-01') <= ?
+        AND (l.effective_until IS NULL OR l.effective_until = '' OR l.effective_until >= ?)
+      ORDER BY l.start_time ASC
+    `, [weekday, date, date]);
+    lessons.push(...rows);
+  }
+
+  return lessons.sort((a, b) => a.weekday - b.weekday || a.start_time.localeCompare(b.start_time));
+}
+
+export async function getLessonsForDay(weekday: number, referenceDate = todayISO()): Promise<Lesson[]> {
+  const date = normalizeEffectiveDate(referenceDate);
   return await getDB().getAllAsync<Lesson>(`
     SELECT l.*, c.name as class_name, c.color as class_color, c.subject
     FROM lessons l
     LEFT JOIN classes c ON l.class_id = c.id
-    WHERE l.schedule_month = ? AND l.weekday = ?
+    WHERE l.weekday = ?
+      AND COALESCE(l.effective_from, l.schedule_month || '-01', '0000-01-01') <= ?
+      AND (l.effective_until IS NULL OR l.effective_until = '' OR l.effective_until >= ?)
     ORDER BY l.start_time ASC
-  `, [monthKey, weekday]);
+  `, [weekday, date, date]);
 }
 
 export async function getLessonsForDate(date: string): Promise<Lesson[]> {
   const weekday = weekdayFromISO(date);
   if (weekday === null) return [];
-
-  const monthKey = monthKeyFromISO(date);
-  await ensureScheduleForMonth(monthKey);
 
   return await getDB().getAllAsync<Lesson>(`
     SELECT
@@ -154,23 +236,38 @@ export async function getLessonsForDate(date: string): Promise<Lesson[]> {
     FROM lessons l
     LEFT JOIN classes c ON l.class_id = c.id
     LEFT JOIN lesson_entries le ON le.lesson_id = l.id AND le.date = ?
-    WHERE l.schedule_month = ? AND l.weekday = ?
+    WHERE l.weekday = ?
+      AND COALESCE(l.effective_from, l.schedule_month || '-01', '0000-01-01') <= ?
+      AND (l.effective_until IS NULL OR l.effective_until = '' OR l.effective_until >= ?)
     ORDER BY l.start_time ASC
-  `, [date, monthKey, weekday]);
+  `, [date, weekday, date, date]);
 }
 
 export async function createLesson(
   data: Omit<Lesson, 'id' | 'created_at' | 'class_name' | 'class_color' | 'subject'>,
-  monthKey = data.schedule_month ?? todayMonthKey()
+  effectiveFromInput = data.effective_from ?? data.schedule_month ?? todayISO()
 ): Promise<number> {
+  const effectiveFrom = normalizeEffectiveDate(effectiveFromInput);
+  const monthKey = data.schedule_month ?? monthKeyFromEffectiveDate(effectiveFrom);
+  await closeConflictingLessonsFromDate({
+    weekday: data.weekday,
+    start_time: data.start_time,
+    effectiveFrom,
+  });
+
   const result = await getDB().runAsync(
-    `INSERT INTO lessons (class_id, kind, title, schedule_month, weekday, start_time, end_time, content, activity, methodology, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO lessons (
+      class_id, kind, title, schedule_month, effective_from, effective_until, weekday, start_time, end_time,
+      content, activity, methodology, status, notes
+    )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.class_id,
       data.kind ?? 'class',
       data.title ?? '',
       monthKey,
+      effectiveFrom,
+      data.effective_until ?? null,
       data.weekday,
       data.start_time,
       data.end_time,
@@ -184,13 +281,50 @@ export async function createLesson(
   return result.lastInsertRowId;
 }
 
-export async function updateLesson(id: number, data: Omit<Lesson, 'id' | 'created_at' | 'class_name' | 'class_color' | 'subject'>): Promise<void> {
+export async function updateLesson(id: number, data: Omit<Lesson, 'id' | 'created_at' | 'class_name' | 'class_color' | 'subject'>): Promise<number> {
+  const effectiveFrom = data.effective_from ? normalizeEffectiveDate(data.effective_from) : null;
+  const existing = effectiveFrom
+    ? await getDB().getFirstAsync<Lesson>('SELECT * FROM lessons WHERE id = ?', [id])
+    : null;
+  const existingFrom = existing
+    ? normalizeEffectiveDate(existing.effective_from ?? existing.schedule_month ?? todayISO())
+    : null;
+
+  if (effectiveFrom && existing && existingFrom && existingFrom < effectiveFrom) {
+    await getDB().runAsync(
+      'UPDATE lessons SET effective_until = ? WHERE id = ?',
+      [addDaysISO(effectiveFrom, -1), id]
+    );
+    const newId = await createLesson({
+      ...data,
+      schedule_month: monthKeyFromEffectiveDate(effectiveFrom),
+      effective_from: effectiveFrom,
+      effective_until: null,
+    }, effectiveFrom);
+    return newId;
+  }
+
+  if (effectiveFrom) {
+    await closeConflictingLessonsFromDate({
+      idToKeepOpen: id,
+      weekday: data.weekday,
+      start_time: data.start_time,
+      effectiveFrom,
+    });
+  }
+
   await getDB().runAsync(
-    `UPDATE lessons SET class_id=?, kind=?, title=?, weekday=?, start_time=?, end_time=?, content=?, activity=?, methodology=?, status=?, notes=? WHERE id=?`,
+    `UPDATE lessons
+     SET class_id=?, kind=?, title=?, schedule_month=?, effective_from=?, effective_until=?,
+         weekday=?, start_time=?, end_time=?, content=?, activity=?, methodology=?, status=?, notes=?
+     WHERE id=?`,
     [
       data.class_id,
       data.kind ?? 'class',
       data.title ?? '',
+      data.schedule_month ?? (effectiveFrom ? monthKeyFromEffectiveDate(effectiveFrom) : todayMonthKey()),
+      effectiveFrom ?? data.effective_from ?? null,
+      data.effective_until ?? null,
       data.weekday,
       data.start_time,
       data.end_time,
@@ -202,6 +336,7 @@ export async function updateLesson(id: number, data: Omit<Lesson, 'id' | 'create
       id,
     ]
   );
+  return id;
 }
 
 export async function deleteLesson(id: number): Promise<void> {
@@ -210,11 +345,27 @@ export async function deleteLesson(id: number): Promise<void> {
 
 async function findOrCreateImportedClass(item: ScheduleImportItem): Promise<{ classId: number; created: boolean }> {
   const existing = await getDB().getFirstAsync<Class>(
-    'SELECT * FROM classes WHERE lower(name) = lower(?) AND lower(subject) = lower(?) LIMIT 1',
-    [item.className, item.subject]
+    'SELECT * FROM classes WHERE lower(name) = lower(?) LIMIT 1',
+    [item.className]
   );
 
-  if (existing) return { classId: existing.id, created: false };
+  if (existing) {
+    const subjects = existing.subject
+      .split(/[,;\n]/)
+      .map(subject => subject.trim())
+      .filter(Boolean);
+    const hasSubject = subjects.some(subject => subject.toLowerCase() === item.subject.trim().toLowerCase());
+    if (!hasSubject && item.subject.trim()) {
+      await updateClass(existing.id, {
+        name: existing.name,
+        grade: existing.grade,
+        subject: [...subjects, item.subject.trim()].join(', '),
+        color: existing.color,
+        student_count: existing.student_count,
+      });
+    }
+    return { classId: existing.id, created: false };
+  }
 
   const classCount = await getDB().getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM classes');
   const color = CLASS_COLORS[(classCount?.count ?? 0) % CLASS_COLORS.length]?.value ?? '#0F4C81';
@@ -229,28 +380,28 @@ async function findOrCreateImportedClass(item: ScheduleImportItem): Promise<{ cl
   return { classId, created: true };
 }
 
-async function lessonAlreadyExists(item: ScheduleImportItem, classId: number | null, monthKey: string): Promise<boolean> {
+async function lessonAlreadyExists(item: ScheduleImportItem, classId: number | null, effectiveFrom: string): Promise<boolean> {
   const row = await getDB().getFirstAsync<{ id: number }>(
     `SELECT id
      FROM lessons
-     WHERE schedule_month = ?
-       AND weekday = ?
+     WHERE weekday = ?
        AND start_time = ?
        AND end_time = ?
        AND kind = ?
        AND COALESCE(title, '') = ?
+       AND COALESCE(effective_from, schedule_month || '-01', '0000-01-01') = ?
        AND (
          (? IS NULL AND class_id IS NULL)
          OR class_id = ?
        )
      LIMIT 1`,
     [
-      monthKey,
       item.weekday,
       item.start_time,
       item.end_time,
       item.kind,
       item.title,
+      effectiveFrom,
       classId,
       classId,
     ]
@@ -261,11 +412,13 @@ async function lessonAlreadyExists(item: ScheduleImportItem, classId: number | n
 
 export async function importWeeklySchedule(
   items: ScheduleImportItem[],
-  monthKey = todayMonthKey()
+  effectiveFromInput = todayISO()
 ): Promise<{ createdClasses: number; createdLessons: number; skippedLessons: number }> {
   let createdClasses = 0;
   let createdLessons = 0;
   let skippedLessons = 0;
+  const effectiveFrom = normalizeEffectiveDate(effectiveFromInput);
+  const monthKey = monthKeyFromEffectiveDate(effectiveFrom);
 
   for (const item of items) {
     let classId: number | null = null;
@@ -276,7 +429,7 @@ export async function importWeeklySchedule(
       if (result.created) createdClasses++;
     }
 
-    if (await lessonAlreadyExists(item, classId, monthKey)) {
+    if (await lessonAlreadyExists(item, classId, effectiveFrom)) {
       skippedLessons++;
       continue;
     }
@@ -289,12 +442,14 @@ export async function importWeeklySchedule(
       weekday: item.weekday,
       start_time: item.start_time,
       end_time: item.end_time,
+      effective_from: effectiveFrom,
+      effective_until: null,
       content: '',
       activity: '',
       methodology: '',
       status: '',
       notes: '',
-    }, monthKey);
+    }, effectiveFrom);
     createdLessons++;
   }
 

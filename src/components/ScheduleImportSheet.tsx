@@ -68,6 +68,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
   const [warnings, setWarnings] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrUnavailable, setOcrUnavailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
 
@@ -92,6 +93,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
     setWarnings([]);
     setEditingId(null);
     setOcrBusy(false);
+    setOcrUnavailable(false);
     setStatus('');
   };
 
@@ -107,6 +109,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
     setItems([]);
     setWarnings([]);
     setEditingId(null);
+    setOcrUnavailable(false);
     setStatus('Lendo imagem...');
     setOcrBusy(true);
 
@@ -114,10 +117,11 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
       const recognized = await recognizeScheduleOcrFromSource(nextSource);
       setOcrText(recognized.text);
       setOcrBlocks(recognized.blocks);
-      setStatus('Texto reconhecido. Revise antes de analisar.');
+      setStatus(recognized.qualityWarning ?? 'Texto reconhecido. Revise antes de analisar.');
     } catch (error) {
       if (error instanceof OcrOfflineUnavailableError) {
-        setStatus('O OCR offline precisa de uma build nativa para funcionar.');
+        setOcrUnavailable(true);
+        setStatus(`${error.message} Você também pode colar ou digitar o texto do horário manualmente.`);
       } else if (error instanceof OcrPdfUnsupportedError) {
         setStatus('A leitura direta de PDF será adicionada depois. Use foto ou imagem por enquanto.');
       } else if (error instanceof OcrLowConfidenceError) {
@@ -138,7 +142,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 1,
       mediaTypes: ['images'],
     });
@@ -149,6 +153,8 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
       name: result.assets[0].fileName ?? 'foto-horario.jpg',
       mimeType: result.assets[0].mimeType,
       type: 'camera',
+      width: result.assets[0].width,
+      height: result.assets[0].height,
     });
   };
 
@@ -160,7 +166,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 1,
       mediaTypes: ['images'],
     });
@@ -171,6 +177,8 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
       name: result.assets[0].fileName ?? 'imagem-horario.jpg',
       mimeType: result.assets[0].mimeType,
       type: 'image',
+      width: result.assets[0].width,
+      height: result.assets[0].height,
     });
   };
 
@@ -281,7 +289,7 @@ export function ScheduleImportSheet({ visible, monthKey, onClose, onImported }: 
           multiline
         />
 
-        {source && !ocrBusy && !hasOcrText ? (
+        {source && !ocrBusy && !hasOcrText && !ocrUnavailable ? (
           <TouchableOpacity style={[styles.retryButton, { borderColor: colors.border }]} onPress={() => handlePickedSource(source)}>
             <Text style={[styles.retryText, { color: colors.primary }]}>Tentar ler novamente</Text>
           </TouchableOpacity>

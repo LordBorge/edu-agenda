@@ -82,6 +82,8 @@ export async function initDatabase(): Promise<void> {
       kind TEXT NOT NULL DEFAULT 'class',
       title TEXT NOT NULL DEFAULT '',
       schedule_month TEXT,
+      effective_from TEXT,
+      effective_until TEXT,
       weekday INTEGER NOT NULL,
       start_time TEXT NOT NULL,
       end_time TEXT NOT NULL,
@@ -277,6 +279,12 @@ async function ensureLessonsScheduleColumns(database: SQLite.SQLiteDatabase): Pr
   if (!names.has('title')) {
     await database.execAsync(`ALTER TABLE lessons ADD COLUMN title TEXT NOT NULL DEFAULT ''`);
   }
+  if (!names.has('effective_from')) {
+    await database.execAsync('ALTER TABLE lessons ADD COLUMN effective_from TEXT');
+  }
+  if (!names.has('effective_until')) {
+    await database.execAsync('ALTER TABLE lessons ADD COLUMN effective_until TEXT');
+  }
 }
 
 async function ensureLessonsSupportReservedBlocks(database: SQLite.SQLiteDatabase): Promise<void> {
@@ -294,6 +302,8 @@ async function ensureLessonsSupportReservedBlocks(database: SQLite.SQLiteDatabas
       kind TEXT NOT NULL DEFAULT 'class',
       title TEXT NOT NULL DEFAULT '',
       schedule_month TEXT,
+      effective_from TEXT,
+      effective_until TEXT,
       weekday INTEGER NOT NULL,
       start_time TEXT NOT NULL,
       end_time TEXT NOT NULL,
@@ -307,7 +317,7 @@ async function ensureLessonsSupportReservedBlocks(database: SQLite.SQLiteDatabas
     );
 
     INSERT INTO lessons_migration (
-      id, class_id, kind, title, schedule_month, weekday, start_time, end_time,
+      id, class_id, kind, title, schedule_month, effective_from, effective_until, weekday, start_time, end_time,
       content, activity, methodology, status, notes, created_at
     )
     SELECT
@@ -316,6 +326,8 @@ async function ensureLessonsSupportReservedBlocks(database: SQLite.SQLiteDatabas
       COALESCE(kind, 'class'),
       COALESCE(title, ''),
       schedule_month,
+      COALESCE(effective_from, CASE WHEN schedule_month IS NOT NULL AND schedule_month <> '' THEN schedule_month || '-01' ELSE NULL END),
+      effective_until,
       weekday,
       start_time,
       end_time,
@@ -386,6 +398,11 @@ async function ensureLegacyLessonsHaveScheduleMonth(database: SQLite.SQLiteDatab
   await database.runAsync(
     'UPDATE lessons SET schedule_month = ? WHERE schedule_month IS NULL OR schedule_month = ?',
     [currentMonthKey(), '']
+  );
+  await database.runAsync(
+    `UPDATE lessons
+     SET effective_from = schedule_month || '-01'
+     WHERE effective_from IS NULL OR effective_from = ''`
   );
 }
 

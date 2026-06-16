@@ -7,6 +7,18 @@ export const CLASS_COLORS = [
   { label: 'Coral', value: '#E25C3B' },
   { label: 'Violeta', value: '#7C3AED' },
   { label: 'Ciano', value: '#0891B2' },
+  { label: 'Verde', value: '#15803D' },
+  { label: 'Lima', value: '#65A30D' },
+  { label: 'Laranja', value: '#EA580C' },
+  { label: 'Vermelho', value: '#DC2626' },
+  { label: 'Fúcsia', value: '#C026D3' },
+  { label: 'Índigo', value: '#4F46E5' },
+  { label: 'Celeste', value: '#0284C7' },
+  { label: 'Esmeralda', value: '#059669' },
+  { label: 'Uva', value: '#9333EA' },
+  { label: 'Grafite', value: '#475569' },
+  { label: 'Marrom', value: '#92400E' },
+  { label: 'Verde Água', value: '#0D9488' },
 ];
 
 export type ActivityTypeVisual = { label: string; color: string; bg: string; icon: string };
