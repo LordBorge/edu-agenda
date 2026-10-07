@@ -45,7 +45,8 @@
           "photosPermission": "O EduAgenda acessa suas imagens para importar prints ou fotos do horário escolar.",
           "cameraPermission": "O EduAgenda usa a câmera para importar a foto do horário escolar."
         }
-      ]
+      ],
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
